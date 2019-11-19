@@ -203,10 +203,10 @@ class UR5(object):
                                        [118, 183, 178],  # cyan
                                        [255, 157, 167]]) / 255.0  # pink
         # Read files in object mesh directory
-        self.test_file_dir = os.path.abspath('simulation/test-cases')
+        self.test_file_dir = os.path.abspath('test-cases/')
         self.test_preset_file = os.path.join(self.test_file_dir, self.testing_file)
         self.obj_mesh_dir=os.path.abspath('../mesh/convex')
-        self.num_obj = 1
+        self.num_obj = 10
         self.mesh_list = os.listdir(self.obj_mesh_dir)
         # Randomly choose objects to add to scene
         self.obj_mesh_ind = np.random.choice(a=len(self.mesh_list), size=self.num_obj, replace=False)
@@ -226,8 +226,8 @@ class UR5(object):
                 self.test_obj_mesh_colors = []
                 self.test_obj_positions = []
                 self.test_obj_orientations = []
-                for object_idx in range(self.num_obj):
-                    file_content_curr_object = file_content[object_idx].split()
+                for i in range(self.num_obj):
+                    file_content_curr_object = file_content[i].split()
                     self.test_obj_mesh_files.append(os.path.join(self.obj_mesh_dir, file_content_curr_object[0]))
                     self.test_obj_type.append(file_content_curr_object[0])
                     self.test_obj_mesh_colors.append(
@@ -247,7 +247,7 @@ class UR5(object):
             print ('Failed connecting to remote API server')
         _, self.ur5_handle = simxGetObjectHandle(self.clientID,self.baseName,simx_opmode_oneshot_wait)
         _, self.ur5_position = simxGetObjectPosition(self.clientID,self.ur5_handle,-1,simx_opmode_oneshot_wait)
-        # self.add_objects()
+        self.add_objects()
         self.ankleinit()
 
 
@@ -285,6 +285,9 @@ class UR5(object):
             Push to the destination
             Return to the init pose
         """
+        self.break_condition(1) 
+
+        time.sleep(1)       
         self.ur5moveto(move_begin)
         time.sleep(0.5)
         self.ur5moveto(move_to)
@@ -303,12 +306,14 @@ class UR5(object):
         """
         self.ur5moveto(suction_point)
         time.sleep(1)
+        self.break_condition(0)
+        time.sleep(1)
         # suction
         # Return to the initial pose with the object
         self.ankleinit()
 
 
-    def ur5release(self, suction_point):
+    def ur5loose(self, suction_point):
         """
             The action of the ur5 in a single release action including:
             Get to suction_point
@@ -316,10 +321,13 @@ class UR5(object):
             Return to the init pose
         """
 
-        self.ur5moveto(suction_point)
+        self.ur5moveto(suction_point)       
         time.sleep(1)
+        #self.break_condition(1)
         # release
         # Return to the initial pose with the object
+        self.break_condition(1)
+        time.sleep(1)
         self.ankleinit()
 
 
@@ -338,27 +346,42 @@ class UR5(object):
         simxPauseCommunication(self.clientID, False)
         simxSynchronousTrigger(self.clientID)
         simxGetPingTime(self.clientID)
+
+    def break_condition(self,state):
+        """
+           set break_condition
+        """
+        simxSynchronousTrigger(self.clientID)
+        simxPauseCommunication(self.clientID, True)
+        simxSetIntegerSignal(self.clientID, 'BREAK', state, simx_opmode_oneshot)
+        simxPauseCommunication(self.clientID, False)
+        simxSynchronousTrigger(self.clientID)
+        simxGetPingTime(self.clientID)
+
         
 
     def add_objects(self):
         # Add objects to robot workspace at x,y location and orientation
         self.object_handles = []
         self.object_type = []
-        for object_idx in range(len(self.obj_mesh_ind)):
+        file = open(self.test_preset_file, 'w')
+        for i in range(self.num_obj):
+            object_idx = self.obj_mesh_ind[i]
             self.object_type.append(self.mesh_list[object_idx])
-            object_color = [self.obj_mesh_color[object_idx][0], self.obj_mesh_color[object_idx][1], self.obj_mesh_color[object_idx][2]]
-            curr_shape_name = 'shape'+str(object_idx)
-            curr_mesh_file = os.path.join(self.obj_mesh_dir, self.mesh_list[self.obj_mesh_ind[object_idx]])
+            object_color = [self.obj_mesh_color[i][0], self.obj_mesh_color[i][1], self.obj_mesh_color[i][2]]
+            curr_mesh_file = os.path.join(self.obj_mesh_dir, self.mesh_list[object_idx])
             drop_x = (self.workspace_limits[0][1] - self.workspace_limits[0][0] - 0.2) * np.random.random_sample() + self.workspace_limits[0][0] + 0.1
             drop_y = (self.workspace_limits[1][1] - self.workspace_limits[1][0] - 0.2) * np.random.random_sample() + self.workspace_limits[1][0] + 0.1
             object_position = [drop_x, drop_y, self.drop_height]
             object_orientation = [2*np.pi*np.random.random_sample(), 2*np.pi*np.random.random_sample(), 2*np.pi*np.random.random_sample()]
-            
+
+            curr_shape_name = 'shape'+str(i)
             if self.is_testing:
-                self.object_type = self.test_obj_type
-                curr_mesh_file = self.test_obj_mesh_files[object_idx]
-                object_position = [self.test_obj_positions[object_idx][0], self.test_obj_positions[object_idx][1], self.test_obj_positions[object_idx][2]]
-                object_orientation = [self.test_obj_orientations[object_idx][0], self.test_obj_orientations[object_idx][1], self.test_obj_orientations[object_idx][2]]
+                self.object_type.append(self.test_obj_type[i])
+                curr_mesh_file = self.test_obj_mesh_files[i]
+                object_color= [self.test_obj_mesh_colors[i][0], self.test_obj_mesh_colors[i][1], self.test_obj_mesh_colors[i][2]]
+                object_position = [self.test_obj_positions[i][0], self.test_obj_positions[i][1], self.test_obj_positions[i][2]]
+                object_orientation = [self.test_obj_orientations[i][0], self.test_obj_orientations[i][1], self.test_obj_orientations[i][2]]
 
             print (object_position + object_orientation + object_color, [curr_mesh_file, curr_shape_name])
             ret_resp,ret_ints,ret_floats,ret_strings,ret_buffer = simxCallScriptFunction(self.clientID, 'remoteApiCommandServer',sim_scripttype_childscript,'importShape',[0,0,255,0], object_position + object_orientation + object_color, [curr_mesh_file, curr_shape_name], bytearray(), simx_opmode_blocking)
@@ -369,6 +392,13 @@ class UR5(object):
                 exit()
             curr_shape_handle = ret_ints[0]
             self.object_handles.append(curr_shape_handle)
+            # create new scene  
+            file_write_content = object_color+ object_position+ object_orientation
+            file.write(self.object_type[i]+' ')
+            for data in file_write_content:
+                file.write(str(data)+' ')
+            file.write('\n')
+        file.close()
 
     def get_obj_positions_and_orientations(self):
         obj_positions = []
