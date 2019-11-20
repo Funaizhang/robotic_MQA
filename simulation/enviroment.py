@@ -401,17 +401,62 @@ class UR5(object):
         file.close()
 
     def get_obj_positions_and_orientations(self):
-        obj_positions = []
-        obj_orientations = []
+        obj_dict = {}
         for object_handle in self.object_handles:
+
+            # get object centre coordinates in world reference frame
             sim_ret, object_position = simxGetObjectPosition(self.sim_client, object_handle, -1, simx_opmode_blocking)
+            assert (sim_ret == 1), "simxGetObjectPosition gives invalid results"
+            print(object_position)
+            X = object_position[0]
+            Y = object_position[1]
+            Z = object_position[2]
+
             sim_ret, object_orientation = simxGetObjectOrientation(self.sim_client, object_handle, -1, simx_opmode_blocking)
-            obj_positions.append(object_position)
-            obj_orientations.append(object_orientation)
+            assert (sim_ret == 1), "simxGetObjectOrientation gives invalid results"
 
-        return obj_positions, obj_orientations
+            # get bounding box coordinates in object reference frame
+            sim_ret_minX, minX = simxGetObjectFloatParameter(object_handle, 15)
+            sim_ret_minY, minY = simxxGetObjectFloatParameter(object_handle, 16)
+            sim_ret_maxX, maxX = simxGetObjectFloatParameter(object_handle, 18)
+            sim_ret_maxY, maxY = simxGetObjectFloatParameter(object_handle, 19)
+            assert (sim_ret_minX == 1 and sim_ret_minY == 1 and sim_ret_maxX == 1 and sim_ret_maxY == 1), "simxGetObjectFloatParameter gives invalid results"
+            # calculate bounding box coordinates in world reference frame
+            minX = minX + X
+            minY = minY + Y
+            maxX = maxX + X
+            maxY = maxY + Y
 
+            obj_dict[object_handle]['position'] = object_position
+            obj_dict[object_handle]['orientation'] = object_orientation
+            obj_dict[object_handle]['bound'] = (minX, minY, maxX, maxY)
 
+            print('get_obj_positions_and_orientations found {} at {}'.format(object_handle, obj_dict[object_handle]['position']))
+
+        return obj_dict
+
+    
+    def check_overlap(self, obj_target_handle, obj_dict):
+        # find the bound of the obj_target
+        (target_minX, target_minY, target_maxX, target_maxY) = obj_dict[obj_target_handle]['bound']
+        overlap_list = []
+
+        for obj in obj_dict:
+            # check if the ith obj we are looking at is obj_target
+            if obj == obj_target_handle:
+                continue
+            # a different obj
+            else:
+                (obj_minX, obj_minY, obj_maxX, obj_maxY) = obj_dict[obj]['bound']
+
+                # check if any corner of obj overlaps with obj_target
+                if ((obj_minX > target_minX and obj_minX < target_maxX) or (obj_maxX > target_minX and obj_maxX < target_maxX)) and ((obj_minY > target_minY and obj_minY < target_maxY) or (obj_maxY > target_minY and obj_maxY < target_maxY)):
+                    overlap_list.append(obj)
+        
+        # obj_dict[obj_target_handle]['overlaps'] = overlap_list
+        return overlap_list
+
+    
 
 class Environment(object):
     """

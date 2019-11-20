@@ -20,7 +20,8 @@ class best_action():
         question_file = open(self.question_dir,encoding='utf-8')
         self.question_dic = json.load(self.question_file)
         question_file.close()
-        self.obj_position,self.obj_oritentation  = self.env.ur5.get_obj_positions_and_orientations
+        self.obj_dict = self.env.ur5.get_obj_positions_and_orientations
+        self.obj_position,self.obj_oritentation = !!!!!
         self.obj_type_exist = self.env.ur5.object_type   # the object which exists in the scene
         self.most_action  =5
 
