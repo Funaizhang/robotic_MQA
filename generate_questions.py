@@ -3,25 +3,8 @@ import os, sys, json
 from question_string_builder import QuestionStringBuilder
 
 class Qusetion():
-    def __init__(self, obj_list, obj_position, obj_orientation,talble_name):
-        self.table_name = table_name
-        self.obj_list = obj_list
-        self.obj-position = obj_position
-        self.obj_orientation = obj_orientation
-        self.query_fns = {
-            'query_room': self.queryRoom,
-            'query_count': self.queryCount,
-            'query_room_count': self.queryRoomCounts,
-            'query_global_object_count': self.queryGlobalObjectCounts,
-            'query_room_object_count': self.queryRoomObjectCounts,
-            'query_exist': self.queryExist,
-            'query_logical': self.queryLogical,
-            'query_color': self.queryColor,
-            'query_color_room': self.queryColorRoom,
-            'query_object': self.queryObject,
-            'query_object_room': self.queryObjectRoom,
-            'query_compare': self.queryCompare
-        }
+    def __init__(self, obj_exist_list):
+        self.obj_exist_list = obj_exist_list    #the object exist in the scenes
 
         self.blacklist_table = [
         'loggia', 'storage', 'guest room', 'hallway', 'wardrobe', 'hall',
@@ -50,12 +33,8 @@ class Qusetion():
             'book', 'books'
         ],
         'exist': [
-            'container', 'containers', 'stationary_container', 'decoration',
-            'trinket', 'place_setting', 'workplace', 'grill', 'switch',
-            'window', 'door', 'column', 'person', 'pet', 'chandelier',
-            'household_appliance', 'ceiling_fan', 'arch', 'book', 'books',
-            'glass', 'roof', 'shelving', 'outdoor_seating', 'stand',
-            'kitchen_cabinet', 'kitchen_set', 'coffin', 'headstone', 'beer'
+            'book', 'bottle', 'cup', 'calculator','key','pen',
+            'cube', 'keyboard', 'mouse', 'scissors', 'stapler','pc'
         ],
         'color': [
             'container', 'containers', 'stationary_container', 'candle',
@@ -164,7 +143,7 @@ class Qusetion():
     def queryExist(self):
         qns = []
         for obj in self.blacklist_objects['exist']:
-            if obj not in self.obj_list:
+            if obj not in obj_exist_list:
                 qns.append(self. questionObjectBuilder(
                     'exist', obj, 'no', q_type='exist_negative'))
             else: 
@@ -182,6 +161,8 @@ class Qusetion():
         if template == 'exist':
             q_str = self.q_str_builder.prepareString(q_str, object_name, self.table_name)
             return {
+                'obj':
+                object_name,
                 'question':
                 q_str,
                 'answer':
