@@ -16,6 +16,7 @@ import sys
 import numpy.random as random
 import numpy as np
 import math
+from collections import defaultdict
 #import PIL.Image as Image
 import array
 #import cv2 as cv
@@ -177,7 +178,7 @@ class Camera(object):
         return location, depth
 
 class UR5(object):
-    def __init__(self, is_testing = 0 ,testing_file='test-10-obj-00.txt'):
+    def __init__(self, is_testing = 0 ,testing_file='test-10-obj-01.txt'):
         #test
         self.is_testing = is_testing
         self.testing_file = testing_file
@@ -206,7 +207,7 @@ class UR5(object):
         self.test_file_dir = os.path.abspath('test-cases/')
         self.test_preset_file = os.path.join(self.test_file_dir, self.testing_file)
         self.obj_mesh_dir=os.path.abspath('../mesh/convex')
-        self.num_obj = 10
+        self.num_obj = 5
         self.mesh_list = os.listdir(self.obj_mesh_dir)
         # Randomly choose objects to add to scene
         self.obj_mesh_ind = np.random.choice(a=len(self.mesh_list), size=self.num_obj, replace=False)
@@ -308,7 +309,7 @@ class UR5(object):
         time.sleep(1)
         self.break_condition(0)
         time.sleep(1)
-        # suction
+        # suction automatically done when suction pad is close to obj
         # Return to the initial pose with the object
         self.ankleinit()
 
@@ -325,9 +326,9 @@ class UR5(object):
         time.sleep(1)
         #self.break_condition(1)
         # release
-        # Return to the initial pose with the object
         self.break_condition(1)
         time.sleep(1)
+        # Return to the initial pose with the object
         self.ankleinit()
 
 
@@ -347,7 +348,7 @@ class UR5(object):
         simxSynchronousTrigger(self.clientID)
         simxGetPingTime(self.clientID)
 
-    def break_condition(self,state):
+    def break_condition(self, state):
         """
            set break_condition
         """
@@ -401,26 +402,29 @@ class UR5(object):
         file.close()
 
     def get_obj_positions_and_orientations(self):
-        obj_dict = {}
+        obj_dict = defaultdict(dict)
+        print(self.object_handles)
         for object_handle in self.object_handles:
 
             # get object centre coordinates in world reference frame
-            sim_ret, object_position = simxGetObjectPosition(self.sim_client, object_handle, -1, simx_opmode_blocking)
-            assert (sim_ret == 1), "simxGetObjectPosition gives invalid results"
-            print(object_position)
+            sim_ret, object_position = simxGetObjectPosition(self.clientID, object_handle, -1, simx_opmode_blocking)
+            # print('debug --- {} {}'.format(sim_ret, object_position))
+            assert (sim_ret == 0), "simxGetObjectPosition gives invalid results"
             X = object_position[0]
             Y = object_position[1]
             Z = object_position[2]
 
-            sim_ret, object_orientation = simxGetObjectOrientation(self.sim_client, object_handle, -1, simx_opmode_blocking)
-            assert (sim_ret == 1), "simxGetObjectOrientation gives invalid results"
+            sim_ret, object_orientation = simxGetObjectOrientation(self.clientID, object_handle, -1, simx_opmode_blocking)
+            assert (sim_ret == 0), "simxGetObjectOrientation gives invalid results"
 
             # get bounding box coordinates in object reference frame
-            sim_ret_minX, minX = simxGetObjectFloatParameter(object_handle, 15)
-            sim_ret_minY, minY = simxxGetObjectFloatParameter(object_handle, 16)
-            sim_ret_maxX, maxX = simxGetObjectFloatParameter(object_handle, 18)
-            sim_ret_maxY, maxY = simxGetObjectFloatParameter(object_handle, 19)
-            assert (sim_ret_minX == 1 and sim_ret_minY == 1 and sim_ret_maxX == 1 and sim_ret_maxY == 1), "simxGetObjectFloatParameter gives invalid results"
+            sim_ret_minX, minX = simxGetObjectFloatParameter(self.clientID, object_handle, 15, simx_opmode_blocking)
+            sim_ret_minY, minY = simxGetObjectFloatParameter(self.clientID, object_handle, 16, simx_opmode_blocking)
+            sim_ret_maxX, maxX = simxGetObjectFloatParameter(self.clientID, object_handle, 18, simx_opmode_blocking)
+            sim_ret_maxY, maxY = simxGetObjectFloatParameter(self.clientID, object_handle, 19, simx_opmode_blocking)
+            assert (sim_ret_minX == 0 and sim_ret_minY == 0 and sim_ret_maxX == 0 and sim_ret_maxY == 0), "simxGetObjectFloatParameter gives invalid results"
+            sizes = (maxX-minX, maxY-minY)
+            print('-- debug -- obj {} size {}'.format(object_handle, sizes))
             # calculate bounding box coordinates in world reference frame
             minX = minX + X
             minY = minY + Y
@@ -431,14 +435,14 @@ class UR5(object):
             obj_dict[object_handle]['orientation'] = object_orientation
             obj_dict[object_handle]['bound'] = (minX, minY, maxX, maxY)
 
-            print('get_obj_positions_and_orientations found {} at {}'.format(object_handle, obj_dict[object_handle]['position']))
+            print('get_obj_positions_and_orientations found {} at {} bound {}'.format(object_handle, obj_dict[object_handle]['position'], obj_dict[object_handle]['bound']))
 
         return obj_dict
 
     
     def check_overlap(self, obj_target_handle, obj_dict):
         # find the bound of the obj_target
-        (target_minX, target_minY, target_maxX, target_maxY) = obj_dict[obj_target_handle]['bound']
+        target_minX, target_minY, target_maxX, target_maxY = obj_dict[obj_target_handle]['bound']
         overlap_list = []
 
         for obj in obj_dict:
@@ -450,7 +454,9 @@ class UR5(object):
                 (obj_minX, obj_minY, obj_maxX, obj_maxY) = obj_dict[obj]['bound']
 
                 # check if any corner of obj overlaps with obj_target
-                if ((obj_minX > target_minX and obj_minX < target_maxX) or (obj_maxX > target_minX and obj_maxX < target_maxX)) and ((obj_minY > target_minY and obj_minY < target_maxY) or (obj_maxY > target_minY and obj_maxY < target_maxY)):
+                obj_in_target = ((obj_minX > target_minX and obj_minX < target_maxX) or (obj_maxX > target_minX and obj_maxX < target_maxX)) and ((obj_minY > target_minY and obj_minY < target_maxY) or (obj_maxY > target_minY and obj_maxY < target_maxY))
+                target_in_obj = ((target_minX > obj_minX and target_minX < obj_maxX) or (target_maxX > obj_minX and target_maxX < obj_maxX)) and ((target_minY > obj_minY and target_minY < obj_maxY) or (target_maxY > obj_minY and target_maxY < obj_maxY))
+                if obj_in_target or target_in_obj:
                     overlap_list.append(obj)
         
         # obj_dict[obj_target_handle]['overlaps'] = overlap_list
