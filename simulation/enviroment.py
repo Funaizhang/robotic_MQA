@@ -500,7 +500,6 @@ class Environment(object):
 
 
 
-
     def close(self):
         """
             End the simulation

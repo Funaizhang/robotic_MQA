@@ -72,7 +72,7 @@ class best_action():
                     action_position,act_type = self.is_targetobject_covered(obj_order)
                     if act_type == 0:  #no covered
                         actions_type.append(0)        
-                        actions.append([0,0,0,0])     #no action
+                        actions.append([0,0,0,0])    #no action
                         rgb_image,depth_image = self.env.camera.get_camera_data()
                         eposide_rgb_images.append(rgb_image)
                         eposide_depth_images.append(depth_image)
