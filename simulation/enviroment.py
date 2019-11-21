@@ -17,9 +17,9 @@ import numpy.random as random
 import numpy as np
 import math
 from collections import defaultdict
-#import PIL.Image as Image
+import PIL.Image as Image
 import array
-#import cv2 as cv
+import cv2 as cv
 
 class Camera(object):
     """
@@ -177,12 +177,29 @@ class Camera(object):
         location = camera_coor + self.cam_position - np.asarray(ur5_position)
         return location, depth
 
+
+    def pixel2world(self, u, v,  push_depth = 0):
+        """
+            from pixel u,v and correspondent depth z -> coor in world coordinate (x,y,z)
+        """
+        depth = self.cur_depth[int(u)][int(v)] / self.depth_scale
+        x = depth * (u - self.intri[0][2]) / self.intri[0][0]
+        y = depth * (v - self.intri[1][2]) / self.intri[1][1]
+        camera_coor = np.array([x, y, depth-push_depth])
+        """
+            from camera coor to world coor
+            Notice the camera faces the plain directly and we needn't convert the depth to real z
+        """
+        camera_coor[2] = - camera_coor[2]
+        location = camera_coor + self.cam_position
+        return location
+
 class UR5(object):
     def __init__(self, is_testing = 0 ,testing_file='test-10-obj-01.txt'):
         #test
         self.is_testing = is_testing
         self.testing_file = testing_file
-        self.obj_type =[]
+        self.object_type =[]
         self.targetPosition = np.zeros(3,dtype = np.float)
         self.targetQuaternion = np.array([0.707,0,0.707,0])
         self.baseName = r'UR5'
@@ -207,7 +224,7 @@ class UR5(object):
         self.test_file_dir = os.path.abspath('test-cases/')
         self.test_preset_file = os.path.join(self.test_file_dir, self.testing_file)
         self.obj_mesh_dir=os.path.abspath('../mesh/convex')
-        self.num_obj = 5
+        self.num_obj = 10
         self.mesh_list = os.listdir(self.obj_mesh_dir)
         # Randomly choose objects to add to scene
         self.obj_mesh_ind = np.random.choice(a=len(self.mesh_list), size=self.num_obj, replace=False)
@@ -309,7 +326,7 @@ class UR5(object):
         time.sleep(1)
         self.break_condition(0)
         time.sleep(1)
-        # suction automatically done when suction pad is close to obj
+        # suction
         # Return to the initial pose with the object
         self.ankleinit()
 
@@ -326,9 +343,9 @@ class UR5(object):
         time.sleep(1)
         #self.break_condition(1)
         # release
+        # Return to the initial pose with the object
         self.break_condition(1)
         time.sleep(1)
-        # Return to the initial pose with the object
         self.ankleinit()
 
 
@@ -348,7 +365,7 @@ class UR5(object):
         simxSynchronousTrigger(self.clientID)
         simxGetPingTime(self.clientID)
 
-    def break_condition(self, state):
+    def break_condition(self,state):
         """
            set break_condition
         """
@@ -364,25 +381,31 @@ class UR5(object):
     def add_objects(self):
         # Add objects to robot workspace at x,y location and orientation
         self.object_handles = []
-        self.object_type = []
-        file = open(self.test_preset_file, 'w')
+        if not self.is_testing:
+            file = open(self.test_preset_file, 'w')
+        object_file_name =[]
         for i in range(self.num_obj):
-            object_idx = self.obj_mesh_ind[i]
-            self.object_type.append(self.mesh_list[object_idx])
-            object_color = [self.obj_mesh_color[i][0], self.obj_mesh_color[i][1], self.obj_mesh_color[i][2]]
-            curr_mesh_file = os.path.join(self.obj_mesh_dir, self.mesh_list[object_idx])
-            drop_x = (self.workspace_limits[0][1] - self.workspace_limits[0][0] - 0.2) * np.random.random_sample() + self.workspace_limits[0][0] + 0.1
-            drop_y = (self.workspace_limits[1][1] - self.workspace_limits[1][0] - 0.2) * np.random.random_sample() + self.workspace_limits[1][0] + 0.1
-            object_position = [drop_x, drop_y, self.drop_height]
-            object_orientation = [2*np.pi*np.random.random_sample(), 2*np.pi*np.random.random_sample(), 2*np.pi*np.random.random_sample()]
-
             curr_shape_name = 'shape'+str(i)
             if self.is_testing:
-                self.object_type.append(self.test_obj_type[i])
+                self.object_type.append(self.test_obj_type[i][:-5])
+                object_file_name.append(self.test_obj_type[i])
                 curr_mesh_file = self.test_obj_mesh_files[i]
                 object_color= [self.test_obj_mesh_colors[i][0], self.test_obj_mesh_colors[i][1], self.test_obj_mesh_colors[i][2]]
                 object_position = [self.test_obj_positions[i][0], self.test_obj_positions[i][1], self.test_obj_positions[i][2]]
                 object_orientation = [self.test_obj_orientations[i][0], self.test_obj_orientations[i][1], self.test_obj_orientations[i][2]]
+            else:
+                object_idx = self.obj_mesh_ind[i]
+                self.object_type.append(self.mesh_list[object_idx][:-5])
+                object_file_name.append(self.mesh_list[object_idx])
+                object_color = [self.obj_mesh_color[i][0], self.obj_mesh_color[i][1], self.obj_mesh_color[i][2]]
+                curr_mesh_file = os.path.join(self.obj_mesh_dir, self.mesh_list[object_idx])
+                drop_x = (self.workspace_limits[0][1] - self.workspace_limits[0][0] - 0.2) * np.random.random_sample() + self.workspace_limits[0][0] + 0.1
+                drop_y = (self.workspace_limits[1][1] - self.workspace_limits[1][0] - 0.2) * np.random.random_sample() + self.workspace_limits[1][0] + 0.1
+                object_position = [drop_x, drop_y, self.drop_height]
+                object_orientation = [2*np.pi*np.random.random_sample(), 2*np.pi*np.random.random_sample(), 2*np.pi*np.random.random_sample()]
+
+ 
+            
 
             print (object_position + object_orientation + object_color, [curr_mesh_file, curr_shape_name])
             ret_resp,ret_ints,ret_floats,ret_strings,ret_buffer = simxCallScriptFunction(self.clientID, 'remoteApiCommandServer',sim_scripttype_childscript,'importShape',[0,0,255,0], object_position + object_orientation + object_color, [curr_mesh_file, curr_shape_name], bytearray(), simx_opmode_blocking)
@@ -393,17 +416,21 @@ class UR5(object):
                 exit()
             curr_shape_handle = ret_ints[0]
             self.object_handles.append(curr_shape_handle)
+            if not self.is_testing:
             # create new scene  
-            file_write_content = object_color+ object_position+ object_orientation
-            file.write(self.object_type[i]+' ')
-            for data in file_write_content:
-                file.write(str(data)+' ')
-            file.write('\n')
-        file.close()
+                file_write_content = object_color+ object_position+ object_orientation
+                file.write(object_file_name[i]+' ')
+                for data in file_write_content:
+                    file.write(str(data)+' ')
+                file.write('\n')
+        if not self.is_testing:
+            file.close()
+
 
     def get_obj_positions_and_orientations(self):
         obj_dict = defaultdict(dict)
         print(self.object_handles)
+        order = 0
         for object_handle in self.object_handles:
 
             # get object centre coordinates in world reference frame
@@ -434,13 +461,15 @@ class UR5(object):
             obj_dict[object_handle]['position'] = object_position
             obj_dict[object_handle]['orientation'] = object_orientation
             obj_dict[object_handle]['bound'] = (minX, minY, maxX, maxY)
+            obj_dict[object_handle]['order'] = order
+            order= order+1
 
             print('get_obj_positions_and_orientations found {} at {} bound {}'.format(object_handle, obj_dict[object_handle]['position'], obj_dict[object_handle]['bound']))
 
         return obj_dict
 
     
-    def check_overlap(self, obj_target_handle, obj_dict):
+    def check_overlap(self,obj_target_handle, obj_dict):
         # find the bound of the obj_target
         target_minX, target_minY, target_maxX, target_maxY = obj_dict[obj_target_handle]['bound']
         overlap_list = []
@@ -462,15 +491,15 @@ class UR5(object):
         # obj_dict[obj_target_handle]['overlaps'] = overlap_list
         return overlap_list
 
-    
+
 
 class Environment(object):
     """
         # simulation environment 
     """
-    def __init__(self):
+    def __init__(self,is_testing = 0 ,testing_file='test-10-obj-00.txt' ):
         # initial the ur5 arm in simulation
-        self.ur5 = UR5()
+        self.ur5 = UR5(is_testing=is_testing,testing_file=testing_file)
         self.ur5.ankleinit()
         self.ur5_location = self.ur5.ur5_position
         # initial the camera in simulation
@@ -480,23 +509,31 @@ class Environment(object):
 
 
 
-    def UR5_action(self,action):
+    def UR5_action(self,action,action_type):   #1:push 2:suck 3:loose
         action_np = np.array(action)
-        action_degree = action_np.shape[1]
-        if action_degree == 2:
-            push_depth=0.01
+        action_type = action_np.shape[1]
+        if action_type == 1:   # the action is pushing
+            push_depth=0
             start_point = action[0]
             end_point = action[1]
-            move_begin, src_depth = self.camera.pixel2ur5(start_point[0], start_point[1], self.ur5_location, push_depth, is_dst = False)
-            move_to, _ = self.camera.pixel2ur5(end_point[0], end_point[1], self.ur5_location, push_depth, src_depth, is_dst = True)
+            move_begin = self.camera.pixel2world(start_point[0], start_point[1], push_depth)
+            move_to = self.camera.pixel2world(end_point[0], end_point[1], push_depth)
             self.ur5.ur5push(move_begin, move_to)
             print('\n -- Push from {} to {}' .format(start_point,end_point))
             return move_begin, move_to
-        elif action_degree == 1:
-            move_begin = []
+        elif action_type == 2: #the action is sucking
             suck_point = action
-            move_to, src_depth = self.camera.pixel2ur5(suck_point[0], suck_point[1], self.ur5_location, 0, is_dst = False)
-            self.ur5.ur5push(move_begin, move_to)
+            move_to= self.camera.pixel2world(suck_point[0], suck_point[1], 0)
+            self.ur5.ur5suction(move_to)
+            print('\n -- suck in {} ' .format(suck_point))
+            return move_to
+        elif action_type == 4: #the action is loosing
+            loose_point = action
+            move_to= self.camera.pixel2world(loose_point[0], loose_point[1], 0)
+            self.ur5.ur5loose(move_to)
+            print('\n -- loose in {} ' .format(loose_point))
+            return move_to
+
 
 
 

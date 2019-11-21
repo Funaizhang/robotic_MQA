@@ -124,18 +124,19 @@ class Qusetion():
         'is the <OBJ> farther from the <OBJ> than from the <OBJ> in the <ROOM>?'
         } 
 
-        self.debug = debug
+   
         self.ent_queue = None
         self.q_str_builder = QuestionStringBuilder()
-        self.question_outputJson = os.path.abspath('question/question.json')
+        self.question_outputJson = os.path.abspath('../questions/question.json')
 
 
 
     def clearQueue(self):
         self.ent_queue = None
 
-    def  createQueue(self):
-        all_qns = queryExist()
+    def createQueue(self):
+        all_qns = self.queryExist()
+        print(all_qns)
         json.dump(all_qns, open(self.question_outputJson, 'w'))
 
 
@@ -143,7 +144,7 @@ class Qusetion():
     def queryExist(self):
         qns = []
         for obj in self.blacklist_objects['exist']:
-            if obj not in obj_exist_list:
+            if obj not in self.obj_exist_list:
                 qns.append(self. questionObjectBuilder(
                     'exist', obj, 'no', q_type='exist_negative'))
             else: 
@@ -159,7 +160,7 @@ class Qusetion():
         q_str = self.templates[template]   
 
         if template == 'exist':
-            q_str = self.q_str_builder.prepareString(q_str, object_name, self.table_name)
+            q_str = self.q_str_builder.prepareString(q_str, object_name, 'desk')
             return {
                 'obj':
                 object_name,
