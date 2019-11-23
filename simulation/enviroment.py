@@ -19,6 +19,9 @@ import math
 from collections import defaultdict
 import PIL.Image as Image
 import array
+import json
+import shapely
+from shapely import Polygon
 import cv2 as cv
 
 class Camera(object):
@@ -204,11 +207,13 @@ class UR5(object):
         self.targetQuaternion = np.array([0.707,0,0.707,0])
         self.baseName = r'UR5'
         table_file = os.path.abspath('../mesh/tables/tables.txt')
+        bound_file = os.path.abspath("../mesh/boundary_size.json")
+        self.bound_dic = json.load(bound_file)
         file = open(table_file, 'r')
         file_content = file.readlines()
         file.close()
-        self.desk_para = file_content[0].split()    
-        self.workspace_limits = np.asarray([[float(self.desk_para[0]), float(self.desk_para[1])], [float(self.desk_para[2]), float(self.desk_para[3])] ])
+        self.table_para = file_content[0].split()    
+        self.workspace_limits = np.asarray([[float(self.table_para[0]), float(self.table_para[1])], [float(self.table_para[2]), float(self.table_para[3])] ])
         self.drop_height = float(self.desk_para[4])+0.2
         self.color_space = np.asarray([[78.0, 121.0, 167.0],  # blue
                                        [89.0, 161.0, 79.0],  # green
@@ -383,12 +388,12 @@ class UR5(object):
         self.object_handles = []
         if not self.is_testing:
             file = open(self.test_preset_file, 'w')
-        object_file_name =[]
+        self.object_file_name =[]
         for i in range(self.num_obj):
             curr_shape_name = 'shape'+str(i)
             if self.is_testing:
                 self.object_type.append(self.test_obj_type[i][:-5])
-                object_file_name.append(self.test_obj_type[i])
+                self.object_file_name.append(self.test_obj_type[i])
                 curr_mesh_file = self.test_obj_mesh_files[i]
                 object_color= [self.test_obj_mesh_colors[i][0], self.test_obj_mesh_colors[i][1], self.test_obj_mesh_colors[i][2]]
                 object_position = [self.test_obj_positions[i][0], self.test_obj_positions[i][1], self.test_obj_positions[i][2]]
@@ -396,7 +401,7 @@ class UR5(object):
             else:
                 object_idx = self.obj_mesh_ind[i]
                 self.object_type.append(self.mesh_list[object_idx][:-5])
-                object_file_name.append(self.mesh_list[object_idx])
+                self.object_file_name.append(self.mesh_list[object_idx])
                 object_color = [self.obj_mesh_color[i][0], self.obj_mesh_color[i][1], self.obj_mesh_color[i][2]]
                 curr_mesh_file = os.path.join(self.obj_mesh_dir, self.mesh_list[object_idx])
                 drop_x = (self.workspace_limits[0][1] - self.workspace_limits[0][0] - 0.2) * np.random.random_sample() + self.workspace_limits[0][0] + 0.1
@@ -419,7 +424,7 @@ class UR5(object):
             if not self.is_testing:
             # create new scene  
                 file_write_content = object_color+ object_position+ object_orientation
-                file.write(object_file_name[i]+' ')
+                file.write(self.object_file_name[i]+' ')
                 for data in file_write_content:
                     file.write(str(data)+' ')
                 file.write('\n')
@@ -429,64 +434,122 @@ class UR5(object):
 
     def get_obj_positions_and_orientations(self):
         obj_dict = defaultdict(dict)
-        print(self.object_handles)
-        order = 0
-        for object_handle in self.object_handles:
+        for i in range(self.num_obj):
+            obj_handle = self.object_handles[i]
+            obj_dict[i]['handle'] = obj_handle
 
-            # get object centre coordinates in world reference frame
-            sim_ret, object_position = simxGetObjectPosition(self.clientID, object_handle, -1, simx_opmode_blocking)
-            # print('debug --- {} {}'.format(sim_ret, object_position))
-            assert (sim_ret == 0), "simxGetObjectPosition gives invalid results"
-            X = object_position[0]
-            Y = object_position[1]
-            Z = object_position[2]
+            _, object_position = simxGetObjectPosition(self.clientID, obj_handle, -1, simx_opmode_blocking)
+            _, object_orientation = simxGetObjectOrientation(self.clientID, obj_handle, -1, simx_opmode_blocking)
+            obj_dict[i]['position'] = object_position
+            obj_dict[i]['orientation'] = object_orientation
 
-            sim_ret, object_orientation = simxGetObjectOrientation(self.clientID, object_handle, -1, simx_opmode_blocking)
-            assert (sim_ret == 0), "simxGetObjectOrientation gives invalid results"
+            object_matrix = self.euler2rotm(object_orientation,object_position)
+            obj_dict[i]['matrix'] = object_matrix
 
-            # get bounding box coordinates in object reference frame
-            sim_ret_minX, minX = simxGetObjectFloatParameter(self.clientID, object_handle, 15, simx_opmode_blocking)
-            sim_ret_minY, minY = simxGetObjectFloatParameter(self.clientID, object_handle, 16, simx_opmode_blocking)
-            sim_ret_maxX, maxX = simxGetObjectFloatParameter(self.clientID, object_handle, 18, simx_opmode_blocking)
-            sim_ret_maxY, maxY = simxGetObjectFloatParameter(self.clientID, object_handle, 19, simx_opmode_blocking)
-            assert (sim_ret_minX == 0 and sim_ret_minY == 0 and sim_ret_maxX == 0 and sim_ret_maxY == 0), "simxGetObjectFloatParameter gives invalid results"
-            sizes = (maxX-minX, maxY-minY)
-            print('-- debug -- obj {} size {}'.format(object_handle, sizes))
-            # calculate bounding box coordinates in world reference frame
-            minX = minX + X
-            minY = minY + Y
-            maxX = maxX + X
-            maxY = maxY + Y
+            obj_name = self.object_file_name[i]
 
-            obj_dict[object_handle]['position'] = object_position
-            obj_dict[object_handle]['orientation'] = object_orientation
-            obj_dict[object_handle]['bound'] = (minX, minY, maxX, maxY)
-            obj_dict[object_handle]['order'] = order
-            order= order+1
+            obj_dict[i]['name'] = obj_name
+            obj_dict[i]['boundary_size'] = self.bound_dic[obj_name]
 
-            print('get_obj_positions_and_orientations found {} at {} bound {}'.format(object_handle, obj_dict[object_handle]['position'], obj_dict[object_handle]['bound']))
-
+            obj_dict[i]['rect'] = self.caculate_projection_rect(object_matrix,self.bound_dic[obj_name])
+           
         return obj_dict
 
-    
-    def check_overlap(self,obj_target_handle, obj_dict):
-        # find the bound of the obj_target
-        target_minX, target_minY, target_maxX, target_maxY = obj_dict[obj_target_handle]['bound']
-        overlap_list = []
+    def euler2rotm(self,theta,position):
+        """
+            -- Get rotation matrix from euler angles
+        """
+        R_x = np.array([[1,         0,                  0                   ],
+                        [0,         math.cos(theta[0]), -math.sin(theta[0]) ],
+                        [0,         math.sin(theta[0]), math.cos(theta[0])  ]
+                        ])
+        R_y = np.array([[math.cos(theta[1]),    0,      math.sin(theta[1])  ],
+                        [0,                     1,      0                   ],
+                        [-math.sin(theta[1]),   0,      math.cos(theta[1])  ]
+                        ])         
+        R_z = np.array([[math.cos(theta[2]),    -math.sin(theta[2]),    0],
+                        [math.sin(theta[2]),    math.cos(theta[2]),     0],
+                        [0,                     0,                      1]
+                        ])            
+        R = np.dot(R_z, np.dot( R_y, R_x ))
+        position_get = np.array([position])
+        position_tran = position_get.T
+        R1 = np.hstack((R,position_tran))
+        R2 = np.array([0,0,0,1])
+        matrix = np.vstack((R1,R2))
+        
+        return matrix
 
-        for obj in obj_dict:
+    def caculate_projection_rect(self,object_matrix,boudary_size):
+        obj_points =np.array( [
+                      [boudary_size[0]/2,boudary_size[0]/2,-boudary_size[0]/2,-boudary_size[0]/2,
+                      boudary_size[0]/2,boudary_size[0]/2,-boudary_size[0]/2,-boudary_size[0]/2],
+
+                      [boudary_size[1]/2,-boudary_size[0]/2,boudary_size[1]/2,-boudary_size[0]/2,
+                      boudary_size[1]/2,-boudary_size[0]/2,boudary_size[1]/2,-boudary_size[0]/2,],
+
+                      [boudary_size[0]/2,boudary_size[0]/2,boudary_size[0]/2,boudary_size[0]/2,
+                      -boudary_size[0]/2,-boudary_size[0]/2,-boudary_size[0]/2,-boudary_size[0]/2],
+
+                      [1,1,1,1,1,1,1,1]
+                     ])
+
+        obj_points_transform = np.dot(object_matrix,obj_points)
+        obj_x_array = obj_points_transform[0]
+        obj_y_array = obj_points_transform[1]
+
+        x_max_point = np.where(obj_x_array == np.max(obj_x_array))
+        x_min_point = np.where(obj_x_array == np.min(obj_x_array))
+        y_max_point = np.where(obj_y_array == np.max(obj_y_array))
+        y_min_point = np.where(obj_y_array == np.min(obj_y_array))
+
+        rect = [
+
+        obj_points_transform[0][x_max_point],obj_points_transform[1][x_max_point],   
+        obj_points_transform[0][x_min_point],obj_points_transform[1][x_min_point],
+        obj_points_transform[0][y_max_point],obj_points_transform[1][y_max_point],
+        obj_points_transform[0][y_min_point],obj_points_transform[1][y_min_point]
+
+        ]
+
+        rect1 = np.array(rect).reshape(4,2)
+        poly = Polygon(rect1).convex_hull
+
+        return poly
+
+    
+
+                      
+        
+
+ 
+    def check_overlap(self,target_order,obj_dict):
+        # find the bound of the obj_target
+        overlap_list = []
+        target_rect =obj_dict[target_order]['rect']
+        target_rect_area = target_rect.area
+        overlap_rate = 0
+        overlap_order = target_order
+
+        for order in range(self.num_obj):
             # check if the ith obj we are looking at is obj_target
-            if obj == obj_target_handle:
+            if order ==target_order:
                 continue
             # a different obj
             else:
-                (obj_minX, obj_minY, obj_maxX, obj_maxY) = obj_dict[obj]['bound']
+                cal_rect = obj_dict[order]['rect']
+                if not target_rect.intersection(cal_rect): # no overlap
+                    continue
+                else:
+                    overlap_area = target_rect.intersection(cal_rect).area
+                    rate_temp = overlap_area / target_rect_area
+                    if rate_temp > overlap_rate:
+                        overlap_rate = rate_temp
+                        overlap_rate = order
+    return overlap_rate,overlap_order
+                
 
-                # check if any corner of obj overlaps with obj_target
-                obj_in_target = ((obj_minX > target_minX and obj_minX < target_maxX) or (obj_maxX > target_minX and obj_maxX < target_maxX)) and ((obj_minY > target_minY and obj_minY < target_maxY) or (obj_maxY > target_minY and obj_maxY < target_maxY))
-                target_in_obj = ((target_minX > obj_minX and target_minX < obj_maxX) or (target_maxX > obj_minX and target_maxX < obj_maxX)) and ((target_minY > obj_minY and target_minY < obj_maxY) or (target_maxY > obj_minY and target_maxY < obj_maxY))
-                if obj_in_target or target_in_obj:
-                    overlap_list.append(obj)
+
         
         # obj_dict[obj_target_handle]['overlaps'] = overlap_list
         return overlap_list

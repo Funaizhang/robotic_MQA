@@ -89,7 +89,7 @@ class Qusetion():
         'global_object_count':
         'how many <OBJ-plural> are there in all <ROOM-plural> across the house?',
         'exist':
-        '<AUX> there <ARTICLE> <OBJ> in the <ROOM>?',
+        '<AUX> there <ARTICLE> <OBJ> in the <TABLE>?',
         'exist_logic':
         '<AUX> there <ARTICLE> <OBJ1> <LOGIC> <ARTICLE> <OBJ2> in the <ROOM>?',
         'color':

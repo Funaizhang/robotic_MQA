@@ -5,6 +5,7 @@ import os
 import enviroment
 from generate_questions import Qusetion
 from generate_actions import best_action
+import h5py
 '''
 scene_list_dir =os.path.abspath("simulation/test_cases")
 scene_list = os.listdir(scene_list_dir)
@@ -26,7 +27,12 @@ my_question =Qusetion(object_exist_list)
 my_question.createQueue()
 '''
 my_action = best_action(my_enviroment)
-my_action.generate_best_action()
+all_data = my_action.generate_best_action()
+
+f = h5py.File('dataset.h5','w')   
+f['data'] = imgData                
+f['labels'] = range(100)           
+f.close()                         
 
 
 
