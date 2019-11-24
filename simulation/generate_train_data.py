@@ -22,17 +22,14 @@ my_enviroment = enviroment.Environment(is_testing=1,testing_file = scene)
 object_exist_list = my_enviroment.ur5.object_type
 print("the objetct which is exist:")
 print(object_exist_list)
-'''
+
 my_question =Qusetion(object_exist_list)
 my_question.createQueue()
-'''
+
 my_action = best_action(my_enviroment)
 all_data = my_action.generate_best_action()
 
-f = h5py.File('dataset.h5','w')   
-f['data'] = imgData                
-f['labels'] = range(100)           
-f.close()                         
+                    
 
 
 

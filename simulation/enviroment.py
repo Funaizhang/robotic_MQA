@@ -21,7 +21,7 @@ import PIL.Image as Image
 import array
 import json
 import shapely
-from shapely import Polygon
+from shapely.geometry import Polygon
 import cv2 as cv
 
 class Camera(object):
@@ -180,6 +180,27 @@ class Camera(object):
         location = camera_coor + self.cam_position - np.asarray(ur5_position)
         return location, depth
 
+    def world2pixel(self,location):
+        """
+            from  coor in world coordinate (x,y,z) to pixel u.v
+        """
+        x=location[0]
+        y=location[1]
+        z=location[2]
+        # extrinsic parameter
+
+        z_1 = -self.depth_scale *(z-self.cam_position[2])
+        x_1 = x-self.cam_position[0]
+        y_1 = y-self.cam_position[1]
+
+        # internal parameter
+        u = int((x_1 / z_1)*self.intri[0][0] +self.intri[0][2])
+        v = int((y_1 / z_1)*self.intri[1][1] +self.intri[1][2])
+
+        return [u,v]
+
+
+
 
     def pixel2world(self, u, v,  push_depth = 0):
         """
@@ -207,14 +228,15 @@ class UR5(object):
         self.targetQuaternion = np.array([0.707,0,0.707,0])
         self.baseName = r'UR5'
         table_file = os.path.abspath('../mesh/tables/tables.txt')
-        bound_file = os.path.abspath("../mesh/boundary_size.json")
+        bound_dir = os.path.abspath("../mesh/boundary_size.json")
+        bound_file = open(bound_dir,encoding='utf-8')
         self.bound_dic = json.load(bound_file)
         file = open(table_file, 'r')
         file_content = file.readlines()
         file.close()
         self.table_para = file_content[0].split()    
         self.workspace_limits = np.asarray([[float(self.table_para[0]), float(self.table_para[1])], [float(self.table_para[2]), float(self.table_para[3])] ])
-        self.drop_height = float(self.desk_para[4])+0.2
+        self.drop_height = float(self.table_para[4])+0.2
         self.color_space = np.asarray([[78.0, 121.0, 167.0],  # blue
                                        [89.0, 161.0, 79.0],  # green
                                        [156, 117, 95],  # brown
@@ -228,7 +250,7 @@ class UR5(object):
         # Read files in object mesh directory
         self.test_file_dir = os.path.abspath('test-cases/')
         self.test_preset_file = os.path.join(self.test_file_dir, self.testing_file)
-        self.obj_mesh_dir=os.path.abspath('../mesh/convex')
+        self.obj_mesh_dir=os.path.abspath('../mesh/exist')
         self.num_obj = 10
         self.mesh_list = os.listdir(self.obj_mesh_dir)
         # Randomly choose objects to add to scene
@@ -413,7 +435,7 @@ class UR5(object):
             
 
             print (object_position + object_orientation + object_color, [curr_mesh_file, curr_shape_name])
-            ret_resp,ret_ints,ret_floats,ret_strings,ret_buffer = simxCallScriptFunction(self.clientID, 'remoteApiCommandServer',sim_scripttype_childscript,'importShape',[0,0,255,0], object_position + object_orientation + object_color, [curr_mesh_file, curr_shape_name], bytearray(), simx_opmode_blocking)
+            ret_resp,ret_ints,_,ret_strings,_ = simxCallScriptFunction(self.clientID, 'remoteApiCommandServer',sim_scripttype_childscript,'importShape',[0,0,255,0], object_position + object_orientation + object_color, [curr_mesh_file, curr_shape_name], bytearray(), simx_opmode_blocking)
             time.sleep(1)
             if ret_resp == 8:
                 print('Failed to add new objects to simulation. Please restart.')
@@ -452,8 +474,9 @@ class UR5(object):
             obj_dict[i]['boundary_size'] = self.bound_dic[obj_name]
 
             obj_dict[i]['rect'] = self.caculate_projection_rect(object_matrix,self.bound_dic[obj_name])
-           
+
         return obj_dict
+
 
     def euler2rotm(self,theta,position):
         """
@@ -525,7 +548,6 @@ class UR5(object):
  
     def check_overlap(self,target_order,obj_dict):
         # find the bound of the obj_target
-        overlap_list = []
         target_rect =obj_dict[target_order]['rect']
         target_rect_area = target_rect.area
         overlap_rate = 0
@@ -533,7 +555,7 @@ class UR5(object):
 
         for order in range(self.num_obj):
             # check if the ith obj we are looking at is obj_target
-            if order ==target_order:
+            if order == target_order:
                 continue
             # a different obj
             else:
@@ -545,20 +567,16 @@ class UR5(object):
                     rate_temp = overlap_area / target_rect_area
                     if rate_temp > overlap_rate:
                         overlap_rate = rate_temp
-                        overlap_rate = order
-    return overlap_rate,overlap_order
+                        overlap_order = order
+                        
+        return overlap_rate,overlap_order
                 
-
-
-        
-        # obj_dict[obj_target_handle]['overlaps'] = overlap_list
-        return overlap_list
 
 
 
 class Environment(object):
     """
-        # simulation environment 
+         simulation environment 
     """
     def __init__(self,is_testing = 0 ,testing_file='test-10-obj-00.txt' ):
         # initial the ur5 arm in simulation
@@ -573,29 +591,40 @@ class Environment(object):
 
 
     def UR5_action(self,action,action_type):   #1:push 2:suck 3:loose
-        action_np = np.array(action)
-        action_type = action_np.shape[1]
         if action_type == 1:   # the action is pushing
             push_depth=0
-            start_point = action[0]
-            end_point = action[1]
+            start_point = [action[0],action[1]]
+            end_point = [action[2],action[3]]
             move_begin = self.camera.pixel2world(start_point[0], start_point[1], push_depth)
             move_to = self.camera.pixel2world(end_point[0], end_point[1], push_depth)
             self.ur5.ur5push(move_begin, move_to)
             print('\n -- Push from {} to {}' .format(start_point,end_point))
             return move_begin, move_to
         elif action_type == 2: #the action is sucking
-            suck_point = action
+            suck_point = [action[0],action[1]]
             move_to= self.camera.pixel2world(suck_point[0], suck_point[1], 0)
             self.ur5.ur5suction(move_to)
             print('\n -- suck in {} ' .format(suck_point))
             return move_to
         elif action_type == 4: #the action is loosing
-            loose_point = action
+            loose_point = [action[0],action[1]]
             move_to= self.camera.pixel2world(loose_point[0], loose_point[1], 0)
             self.ur5.ur5loose(move_to)
             print('\n -- loose in {} ' .format(loose_point))
             return move_to
+
+    def UR5_action1(self,action,action_type):   #1:push 2:suck 3:loose
+        if action_type == 1:   # the action is pushing
+            start_point = [action[0],action[1],action[2]]
+            end_point = [action[3],action[4],action[5]]
+            self.ur5.ur5push(start_point, end_point)
+
+        elif action_type == 2: #the action is sucking
+            suck_point = [action[0],action[1],action[2]]
+            self.ur5.ur5suction(suck_point)
+
+
+
 
 
 

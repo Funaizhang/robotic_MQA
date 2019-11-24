@@ -21,7 +21,7 @@ class best_action():
         self.question_file.close()
         self.obj_dict = self.my_env.ur5.get_obj_positions_and_orientations
         self.obj_type_exist = self.my_env.ur5.object_type   # the object which exists in the scene
-        self.most_action  =3
+        self.most_action  =1
 
         self.object_character = {
         'suck': [                                                     # the objects that are able to be suck
@@ -58,6 +58,7 @@ class best_action():
                 action_position = []
                 action_times = 0
                 ques_object = ques['obj'] 
+                obj_order = self.my_env.ur5.object_type.index(ques['obj'])
                 print(".............")
                 print(ques_object)
                 if ques_object not in self.object_character['cover']:
@@ -67,32 +68,33 @@ class best_action():
                     rgb_image,_ = self.my_env.camera.get_camera_data()
                     episode_rgb_images.append(rgb_image)
                 else: 
-                    action_position,act_type = self.is_targetobject_overlap(obj_order)
-                    if act_type == 3:  #no covered
+                    action_position,act_type,act_name = self.is_targetobject_overlap(obj_order)
+                    if act_type == 0:  #no covered
                         print("no cover")
-                        actions_type.append(3)        
-                        actions.append([3,3,3,3,3,3])    #no action
+                        actions_type.append(0)        
+                        actions.append([0,0,0,0])    #no action
                         rgb_image,_ = self.my_env.camera.get_camera_data()
                         episode_rgb_images.append(rgb_image)
-                    while (act_type!=3) and (action_times<self.most_action):
-                        print("cover")     
+                    while (act_type!=0) and (action_times<self.most_action):
+                        print("%s cover"%(act_name))     
                         actions_type.append(act_type)
                         actions.append(action_position)
-                        rgb_image,depth_image = self.my_env.camera.get_camera_data()
-                        self.my_env.action(action_position,act_type)                
+                        rgb_image,_ = self.my_env.camera.get_camera_data()
+                        self.my_env.UR5_action1(action_position,act_type)                
                         episode_rgb_images.append(rgb_image)
-                        action_position,act_type = self.is_targetobject_overlap(obj_order)
+                        action_position,act_type,act_name = self.is_targetobject_overlap(obj_order)
                         action_times += 1
-                print("........")
+                   
+               
 
             elif ques['type'] == 'exist_negative':
                 print("...............")
                 print("no action")
-                actions_type.append(3)        
-                actions.append([3,3,3,3,3,3])     #no action
-                rgb_image,depth_image = self.my_env.camera.get_camera_data()
+                actions_type.append(0)        
+                actions.append([0,0,0,0])     #no action
+                rgb_image,_ = self.my_env.camera.get_camera_data()
                 episode_rgb_images.append(rgb_image)
-                print("..............")
+    
 
             result = {
                         "act_type": actions_type,
@@ -103,7 +105,7 @@ class best_action():
                 }
 
             all_action.append(result)
-            obj_order +=1
+   
         return all_action
 
 
@@ -112,19 +114,24 @@ class best_action():
 
         obj_dic = self.my_env.ur5.get_obj_positions_and_orientations()
         overlap_rate,overlap_order = self.my_env.ur5.check_overlap(target_order,obj_dic)   # return the cover handle
-        ant_type = 3
-        action_position = [3,3,3,3,3,3]
+        ant_type = 0
+        action_position = [0,0,0,0]
+        action_obj_name =''
 
         if overlap_rate < 0.5:    #no cover
-            ant_type =3
-            action_position = [3,3,3,3,3,3]
+            ant_type =0
+            action_position = [0,0,0,0]
         else:
 
             obj_cover_type = self.my_env.ur5.object_type[overlap_order]
 
+            obj_cover_position = self.my_env.camera.world2pixel(obj_dic[overlap_order]['position'])
+
+            #target_position =  self.my_env.camera.world2pixel(obj_dic[target_order]['position'])
+
             obj_cover_position = obj_dic[overlap_order]['position']
 
-            target_position = obj_dic[target_order]['position']
+            target_position =  obj_dic[target_order]['position']
 
             if obj_cover_type  in self.object_character['suck']:
                 ant_type = 2
@@ -132,7 +139,8 @@ class best_action():
             else:
                 ant_type = 1
                 action_position = target_position+ obj_cover_position
-        return action_position,ant_type
+        action_obj_name = obj_dic[overlap_order]['name']
+        return action_position,ant_type,action_obj_name
 
        
 
