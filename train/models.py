@@ -541,3 +541,121 @@ class NavPlannerControllerModel(nn.Module):
         planner_scores, planner_hidden = self.planner_nav_rnn.step_forward(
             img_feats, ques_feats, actions_in, planner_hidden)
 
+
+
+
+# ----------- VQA -----------
+
+
+class VqaLstmModel(nn.Module):
+    def __init__(self,
+                 vocab,
+                 rnn_wordvec_dim=64,
+                 rnn_dim=64,
+                 rnn_num_layers=2,
+                 rnn_dropout=0.5,
+                 fc_use_batchnorm=False,
+                 fc_dropout=0.5,
+                 fc_dims=(64, )):
+        super(VqaLstmModel, self).__init__()
+        rnn_kwargs = {
+            'token_to_idx': vocab['questionTokenToIdx'],
+            'wordvec_dim': rnn_wordvec_dim,
+            'rnn_dim': rnn_dim,
+            'rnn_num_layers': rnn_num_layers,
+            'rnn_dropout': rnn_dropout,
+        }
+        self.rnn = QuestionLstmEncoder(**rnn_kwargs)
+
+        classifier_kwargs = {
+            'input_dim': rnn_dim,
+            'hidden_dims': fc_dims,
+            'output_dim': len(vocab['answerTokenToIdx']),
+            'use_batchnorm': fc_use_batchnorm,
+            'dropout': fc_dropout,
+            'add_sigmoid': 0
+        }
+        self.classifier = build_mlp(**classifier_kwargs)
+
+    def forward(self, questions):
+        q_feats = self.rnn(questions)
+        scores = self.classifier(q_feats)
+        return scores
+
+
+class VqaLstmCnnAttentionModel(nn.Module):
+    def __init__(self,
+                 vocab,
+                 image_feat_dim=64,
+                 question_wordvec_dim=64,
+                 question_hidden_dim=64,
+                 question_num_layers=2,
+                 question_dropout=0.5,
+                 fc_use_batchnorm=False,
+                 fc_dropout=0.5,
+                 fc_dims=(64, )):
+        super(VqaLstmCnnAttentionModel, self).__init__()
+
+        cnn_kwargs = {'num_classes': 191, 'pretrained': True}
+        self.cnn = MultitaskCNN(**cnn_kwargs)
+        self.cnn_fc_layer = nn.Sequential(
+            nn.Linear(32 * 10 * 10, 64), nn.ReLU(), nn.Dropout(p=0.5))
+
+        q_rnn_kwargs = {
+            'token_to_idx': vocab['questionTokenToIdx'],
+            'wordvec_dim': question_wordvec_dim,
+            'rnn_dim': question_hidden_dim,
+            'rnn_num_layers': question_num_layers,
+            'rnn_dropout': question_dropout,
+        }
+        self.q_rnn = QuestionLstmEncoder(**q_rnn_kwargs)
+
+        self.img_tr = nn.Sequential(nn.Linear(64, 64), nn.Dropout(p=0.5))
+
+        self.ques_tr = nn.Sequential(nn.Linear(64, 64), nn.Dropout(p=0.5))
+
+        classifier_kwargs = {
+            'input_dim': 64,
+            'hidden_dims': fc_dims,
+            'output_dim': len(vocab['answerTokenToIdx']),
+            'use_batchnorm': fc_use_batchnorm,
+            'dropout': fc_dropout,
+            'add_sigmoid': 0
+        }
+        self.classifier = build_mlp(**classifier_kwargs)
+
+        self.att = nn.Sequential(
+            nn.Tanh(), nn.Dropout(p=0.5), nn.Linear(128, 1))
+
+    def forward(self, images, questions):
+
+        N, T, _, _, _ = images.size()
+
+        # bs x 5 x 3 x 224 x 224
+        img_feats = self.cnn(images.contiguous().view(
+            -1, images.size(2), images.size(3), images.size(4)))
+        img_feats = self.cnn_fc_layer(img_feats)
+
+        img_feats_tr = self.img_tr(img_feats)
+
+        ques_feats = self.q_rnn(questions)
+        ques_feats_repl = ques_feats.view(N, 1, -1).repeat(1, T, 1)
+        ques_feats_repl = ques_feats_repl.view(N * T, -1)
+
+        ques_feats_tr = self.ques_tr(ques_feats_repl)
+
+        ques_img_feats = torch.cat([ques_feats_tr, img_feats_tr], 1)
+
+        att_feats = self.att(ques_img_feats)
+        att_probs = F.softmax(att_feats.view(N, T), dim=1)
+        att_probs2 = att_probs.view(N, T, 1).repeat(1, 1, 64)
+
+        att_img_feats = torch.mul(att_probs2, img_feats.view(N, T, 64))
+        att_img_feats = torch.sum(att_img_feats, dim=1)
+
+        mul_feats = torch.mul(ques_feats, att_img_feats)
+
+        scores = self.classifier(mul_feats)
+
+        return scores, att_probs
+
