@@ -39,8 +39,8 @@ class Camera(object):
         self.Save_PATH_DEPTH = r'./depth'
         self.Dis_FAR = 10
         self.depth_scale = 1000
-        self.Img_WIDTH = 512
-        self.Img_HEIGHT = 424
+        self.Img_WIDTH = 128
+        self.Img_HEIGHT = 128
         self.border_pos = [120,375,100,430]# [68,324,112,388] #up down left right of the box
         self.theta = 70
         self.Camera_NAME = r'kinect'
@@ -189,7 +189,7 @@ class Camera(object):
         z=location[2]
         # extrinsic parameter
 
-        z_1 = -self.depth_scale *(z-self.cam_position[2])
+        z_1 = self.cam_position[2]-z
         x_1 = x-self.cam_position[0]
         y_1 = y-self.cam_position[1]
 
@@ -252,6 +252,7 @@ class UR5(object):
         self.test_preset_file = os.path.join(self.test_file_dir, self.testing_file)
         self.obj_mesh_dir=os.path.abspath('../mesh/exist')
         self.num_obj = 10
+
         self.obj_dict = defaultdict(dict)
         self.mesh_list = os.listdir(self.obj_mesh_dir)
         # Randomly choose objects to add to scene
@@ -530,7 +531,6 @@ class UR5(object):
         y_min_point = np.where(obj_y_array == np.min(obj_y_array))[0][0]
 
 
-
         rect = [
 
         obj_points_transform[x_max_point][0],obj_points_transform[x_max_point][1],   
@@ -572,6 +572,7 @@ class UR5(object):
         return overlap_rate,overlap_order
     
 
+ 
 
 
 
@@ -603,7 +604,7 @@ class Environment(object):
             return move_begin, move_to
         elif action_type == 2: #the action is sucking
             suck_point = [action[0],action[1]]
-            move_to= self.camera.pixel2world(suck_point[0], suck_point[1], 0)
+            move_to= self.camera.pixel2world(suck_point[0], suck_point[1], -0.1)
             self.ur5.ur5suction(move_to)
             print('\n -- suck in {} ' .format(suck_point))
             return move_to
@@ -613,16 +614,6 @@ class Environment(object):
             self.ur5.ur5loose(move_to)
             print('\n -- loose in {} ' .format(loose_point))
             return move_to
-
-    def UR5_action1(self,action,action_type):   #1:push 2:suck 3:loose
-        if action_type == 1:   # the action is pushing
-            start_point = [action[0],action[1],action[2]]
-            end_point = [action[3],action[4],action[5]]
-            self.ur5.ur5push(start_point, end_point)
-
-        elif action_type == 2: #the action is sucking
-            suck_point = [action[0],action[1],action[2]]
-            self.ur5.ur5suction(suck_point)
 
 
 

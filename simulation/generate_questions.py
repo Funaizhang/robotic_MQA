@@ -128,6 +128,7 @@ class Qusetion():
         self.ent_queue = None
         self.q_str_builder = QuestionStringBuilder()
         self.question_outputJson = os.path.abspath('../questions/question.json')
+        self.vocab_outputJson = os.path.abspath("../questions/vocab.json")
 
 
 
@@ -172,7 +173,95 @@ class Qusetion():
                 q_type,
             }
 
-       
+
+    def tokenize(self,seq,delim=' ',punctToRemove=None,addStartToken=True,addEndToken=True):
+
+        if punctToRemove is not None:
+            for p in punctToRemove:
+                seq = str(seq).replace(p, '')
+
+        tokens = str(seq).split(delim)
+        if addStartToken:
+            tokens.insert(0, '<START>')
+
+        if addEndToken:
+            tokens.append('<END>')
+
+        return tokens
 
 
-  
+    def buildVocab(self,sequences,
+               minTokenCount=1,
+               delim=' ',
+               punctToRemove=None,
+               addSpecialTok=False):
+        SPECIAL_TOKENS = {
+            '<NULL>': 0,
+            '<START>': 1,
+            '<END>': 2,
+            '<UNK>': 3,
+        }
+
+        tokenToCount = {}
+        for seq in sequences:
+            seqTokens = self.tokenize(seq,delim=delim,punctToRemove=punctToRemove,addStartToken=False,addEndToken=False)
+            for token in seqTokens:
+                if token not in tokenToCount:
+                    tokenToCount[token] = 0
+                tokenToCount[token] += 1
+
+        tokenToIdx = {}
+        if addSpecialTok == True:
+            for token, idx in SPECIAL_TOKENS.items():
+                tokenToIdx[token] = idx
+        for token, count in sorted(tokenToCount.items()):
+            if count >= minTokenCount:
+                tokenToIdx[token] = len(tokenToIdx)
+
+        return tokenToIdx
+
+
+
+    def encode(self,seqTokens, tokenToIdx, allowUnk=False):
+        seqIdx = []
+        for token in seqTokens:
+            if token not in tokenToIdx:
+                if allowUnk:
+                    token = '<UNK>'
+                else:
+                    raise KeyError('Token "%s" not in vocab' % token)
+            seqIdx.append(tokenToIdx[token])
+        return seqIdx
+
+
+    def decode(self,seqIdx, idxToToken, delim=None, stopAtEnd=True):
+        tokens = []
+        for idx in seqIdx:
+            tokens.append(idxToToken[idx])
+            if stopAtEnd and tokens[-1] == '<END>':
+                break
+        if delim is None:
+            return tokens
+        else:
+            return delim.join(tokens)
+
+
+    def create_vocab(self):
+        question_file = open(self.question_outputJson,'r',encoding='utf-8')
+        questions = json.load(question_file)
+        answerTokenToIdx = self.buildVocab((str(q['answer']) for q in questions
+                                       if q['answer'] != 'NIL'))
+        questionTokenToIdx = self.buildVocab(
+            (q['question'] for q in questions if q['answer'] != 'NIL'),
+            punctToRemove=['?'],
+            addSpecialTok=True)
+
+        vocab = {
+            'questionTokenToIdx': questionTokenToIdx,
+            'answerTokenToIdx': answerTokenToIdx,
+        }
+        json.dump(vocab, open(self.vocab_outputJson, 'w'))
+        return vocab
+
+
+    
