@@ -236,7 +236,7 @@ class UR5(object):
         file.close()
         self.table_para = file_content[0].split()    
         self.workspace_limits = np.asarray([[float(self.table_para[0]), float(self.table_para[1])], [float(self.table_para[2]), float(self.table_para[3])] ])
-        self.drop_height = float(self.table_para[4])+0.2
+        self.drop_height = float(self.table_para[4])+0.05
         self.color_space = np.asarray([[78.0, 121.0, 167.0],  # blue
                                        [89.0, 161.0, 79.0],  # green
                                        [156, 117, 95],  # brown
@@ -252,6 +252,7 @@ class UR5(object):
         self.test_preset_file = os.path.join(self.test_file_dir, self.testing_file)
         self.obj_mesh_dir=os.path.abspath('../mesh/exist')
         self.num_obj = 10
+        self.obj_dict = defaultdict(dict)
         self.mesh_list = os.listdir(self.obj_mesh_dir)
         # Randomly choose objects to add to scene
         self.obj_mesh_ind = np.random.choice(a=len(self.mesh_list), size=self.num_obj, replace=False)
@@ -431,8 +432,6 @@ class UR5(object):
                 object_position = [drop_x, drop_y, self.drop_height]
                 object_orientation = [2*np.pi*np.random.random_sample(), 2*np.pi*np.random.random_sample(), 2*np.pi*np.random.random_sample()]
 
- 
-            
 
             print (object_position + object_orientation + object_color, [curr_mesh_file, curr_shape_name])
             ret_resp,ret_ints,_,ret_strings,_ = simxCallScriptFunction(self.clientID, 'remoteApiCommandServer',sim_scripttype_childscript,'importShape',[0,0,255,0], object_position + object_orientation + object_color, [curr_mesh_file, curr_shape_name], bytearray(), simx_opmode_blocking)
@@ -453,29 +452,31 @@ class UR5(object):
         if not self.is_testing:
             file.close()
 
-
+    
     def get_obj_positions_and_orientations(self):
-        obj_dict = defaultdict(dict)
+        
         for i in range(self.num_obj):
             obj_handle = self.object_handles[i]
-            obj_dict[i]['handle'] = obj_handle
+            self.obj_dict[i]['handle'] = obj_handle
 
             _, object_position = simxGetObjectPosition(self.clientID, obj_handle, -1, simx_opmode_blocking)
             _, object_orientation = simxGetObjectOrientation(self.clientID, obj_handle, -1, simx_opmode_blocking)
-            obj_dict[i]['position'] = object_position
-            obj_dict[i]['orientation'] = object_orientation
+            self.obj_dict[i]['position'] = object_position
+            self.obj_dict[i]['orientation'] = object_orientation
 
-            object_matrix = self.euler2rotm(object_orientation,object_position)
-            obj_dict[i]['matrix'] = object_matrix
+            object_matrix = self.euler2rotm(object_orientation, object_position)
+            # object_matrix = self.euler2rotm_1(i)
+            self.obj_dict[i]['matrix'] = object_matrix
 
             obj_name = self.object_file_name[i]
 
-            obj_dict[i]['name'] = obj_name
-            obj_dict[i]['boundary_size'] = self.bound_dic[obj_name]
+            self.obj_dict[i]['name'] = obj_name
+            self.obj_dict[i]['boundary_size'] = self.bound_dic[obj_name]
 
-            obj_dict[i]['rect'] = self.caculate_projection_rect(object_matrix,self.bound_dic[obj_name])
+            self.obj_dict[i]['rect'] = self.caculate_projection_rect(object_matrix,self.bound_dic[obj_name])
+            # self.obj_dict[i]['rect'] = self.caculate_projection_rect_1(i)
 
-        return obj_dict
+        return self.obj_dict
 
 
     def euler2rotm(self,theta,position):
@@ -496,42 +497,46 @@ class UR5(object):
                         ])            
         R = np.dot(R_z, np.dot( R_y, R_x ))
         position_get = np.array([position])
-        position_tran = position_get.T
-        R1 = np.hstack((R,position_tran))
-        R2 = np.array([0,0,0,1])
-        matrix = np.vstack((R1,R2))
-        
-        return matrix
+        R1 = np.vstack((R,position_get))
+     
+        return R1
 
-    def caculate_projection_rect(self,object_matrix,boudary_size):
+
+    def caculate_projection_rect(self,object_matrix,boundary_size):
         obj_points =np.array( [
-                      [boudary_size[0]/2,boudary_size[0]/2,-boudary_size[0]/2,-boudary_size[0]/2,
-                      boudary_size[0]/2,boudary_size[0]/2,-boudary_size[0]/2,-boudary_size[0]/2],
+                      [boundary_size[0]/2,boundary_size[0]/2,-boundary_size[0]/2,-boundary_size[0]/2,
+                      boundary_size[0]/2,boundary_size[0]/2,-boundary_size[0]/2,-boundary_size[0]/2],
 
-                      [boudary_size[1]/2,-boudary_size[0]/2,boudary_size[1]/2,-boudary_size[0]/2,
-                      boudary_size[1]/2,-boudary_size[0]/2,boudary_size[1]/2,-boudary_size[0]/2,],
+                      [boundary_size[1]/2,-boundary_size[0]/2,boundary_size[1]/2,-boundary_size[0]/2,
+                      boundary_size[1]/2,-boundary_size[0]/2,boundary_size[1]/2,-boundary_size[0]/2,],
 
-                      [boudary_size[0]/2,boudary_size[0]/2,boudary_size[0]/2,boudary_size[0]/2,
-                      -boudary_size[0]/2,-boudary_size[0]/2,-boudary_size[0]/2,-boudary_size[0]/2],
+                      [boundary_size[2]/2,boundary_size[2]/2,boundary_size[2]/2,boundary_size[2]/2,
+                      -boundary_size[2]/2,-boundary_size[2]/2,-boundary_size[2]/2,-boundary_size[2]/2],
 
                       [1,1,1,1,1,1,1,1]
                      ])
 
-        obj_points_transform = np.dot(object_matrix,obj_points)
-        obj_x_array = obj_points_transform[0]
-        obj_y_array = obj_points_transform[1]
+        obj_points = obj_points.T
+        obj_points_transform = np.dot(obj_points,object_matrix)
+        obj_points_transform = np.array(obj_points_transform)
+        obj_points_transform = obj_points_transform.reshape(8,3)
+        obj_x_array = obj_points_transform[:,0].T
+        obj_y_array = obj_points_transform[:,1].T
 
-        x_max_point = np.where(obj_x_array == np.max(obj_x_array))
-        x_min_point = np.where(obj_x_array == np.min(obj_x_array))
-        y_max_point = np.where(obj_y_array == np.max(obj_y_array))
-        y_min_point = np.where(obj_y_array == np.min(obj_y_array))
+
+        x_max_point = np.where(obj_x_array == np.max(obj_x_array))[0][0]
+        x_min_point = np.where(obj_x_array == np.min(obj_x_array))[0][0]
+        y_max_point = np.where(obj_y_array == np.max(obj_y_array))[0][0]
+        y_min_point = np.where(obj_y_array == np.min(obj_y_array))[0][0]
+
+
 
         rect = [
 
-        obj_points_transform[0][x_max_point],obj_points_transform[1][x_max_point],   
-        obj_points_transform[0][x_min_point],obj_points_transform[1][x_min_point],
-        obj_points_transform[0][y_max_point],obj_points_transform[1][y_max_point],
-        obj_points_transform[0][y_min_point],obj_points_transform[1][y_min_point]
+        obj_points_transform[x_max_point][0],obj_points_transform[x_max_point][1],   
+        obj_points_transform[x_min_point][0],obj_points_transform[x_min_point][1],
+        obj_points_transform[y_max_point][0],obj_points_transform[y_max_point][1],
+        obj_points_transform[y_min_point][0],obj_points_transform[y_min_point][1]
 
         ]
 
@@ -540,15 +545,10 @@ class UR5(object):
 
         return poly
 
-    
 
-                      
-        
-
- 
     def check_overlap(self,target_order,obj_dict):
         # find the bound of the obj_target
-        target_rect =obj_dict[target_order]['rect']
+        target_rect =self.obj_dict[target_order]['rect']
         target_rect_area = target_rect.area
         overlap_rate = 0
         overlap_order = target_order
@@ -559,7 +559,7 @@ class UR5(object):
                 continue
             # a different obj
             else:
-                cal_rect = obj_dict[order]['rect']
+                cal_rect = self.obj_dict[order]['rect']
                 if not target_rect.intersection(cal_rect): # no overlap
                     continue
                 else:
@@ -570,7 +570,8 @@ class UR5(object):
                         overlap_order = order
                         
         return overlap_rate,overlap_order
-                
+    
+
 
 
 
@@ -622,8 +623,6 @@ class Environment(object):
         elif action_type == 2: #the action is sucking
             suck_point = [action[0],action[1],action[2]]
             self.ur5.ur5suction(suck_point)
-
-
 
 
 

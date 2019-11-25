@@ -25,7 +25,7 @@ class best_action():
 
         self.object_character = {
         'suck': [                                                     # the objects that are able to be suck
-            'cube', 'bottle', 'book'
+            'cube', 'bottle', 'book','calculator'
         ],
         'push': [                                                    # the objects that are able to be push
             'book', 'bottle', 'cup', 'calculator',
