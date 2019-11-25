@@ -236,7 +236,7 @@ class UR5(object):
         file.close()
         self.table_para = file_content[0].split()    
         self.workspace_limits = np.asarray([[float(self.table_para[0]), float(self.table_para[1])], [float(self.table_para[2]), float(self.table_para[3])] ])
-        self.drop_height = float(self.table_para[4])+0.2
+        self.drop_height = float(self.table_para[4])+0.05
         self.color_space = np.asarray([[78.0, 121.0, 167.0],  # blue
                                        [89.0, 161.0, 79.0],  # green
                                        [156, 117, 95],  # brown
@@ -251,7 +251,8 @@ class UR5(object):
         self.test_file_dir = os.path.abspath('test-cases/')
         self.test_preset_file = os.path.join(self.test_file_dir, self.testing_file)
         self.obj_mesh_dir=os.path.abspath('../mesh/exist')
-        self.num_obj = 10
+        self.num_obj = 5
+        self.obj_dict = defaultdict(dict)
         self.mesh_list = os.listdir(self.obj_mesh_dir)
         # Randomly choose objects to add to scene
         self.obj_mesh_ind = np.random.choice(a=len(self.mesh_list), size=self.num_obj, replace=False)
@@ -431,8 +432,6 @@ class UR5(object):
                 object_position = [drop_x, drop_y, self.drop_height]
                 object_orientation = [2*np.pi*np.random.random_sample(), 2*np.pi*np.random.random_sample(), 2*np.pi*np.random.random_sample()]
 
- 
-            
 
             print (object_position + object_orientation + object_color, [curr_mesh_file, curr_shape_name])
             ret_resp,ret_ints,_,ret_strings,_ = simxCallScriptFunction(self.clientID, 'remoteApiCommandServer',sim_scripttype_childscript,'importShape',[0,0,255,0], object_position + object_orientation + object_color, [curr_mesh_file, curr_shape_name], bytearray(), simx_opmode_blocking)
@@ -453,29 +452,31 @@ class UR5(object):
         if not self.is_testing:
             file.close()
 
-
+    
     def get_obj_positions_and_orientations(self):
-        obj_dict = defaultdict(dict)
+        
         for i in range(self.num_obj):
             obj_handle = self.object_handles[i]
-            obj_dict[i]['handle'] = obj_handle
+            self.obj_dict[i]['handle'] = obj_handle
 
             _, object_position = simxGetObjectPosition(self.clientID, obj_handle, -1, simx_opmode_blocking)
             _, object_orientation = simxGetObjectOrientation(self.clientID, obj_handle, -1, simx_opmode_blocking)
-            obj_dict[i]['position'] = object_position
-            obj_dict[i]['orientation'] = object_orientation
+            self.obj_dict[i]['position'] = object_position
+            self.obj_dict[i]['orientation'] = object_orientation
 
-            object_matrix = self.euler2rotm(object_orientation,object_position)
-            obj_dict[i]['matrix'] = object_matrix
+            object_matrix = self.euler2rotm(object_orientation, object_position)
+            # object_matrix = self.euler2rotm_1(i)
+            self.obj_dict[i]['matrix'] = object_matrix
 
             obj_name = self.object_file_name[i]
 
-            obj_dict[i]['name'] = obj_name
-            obj_dict[i]['boundary_size'] = self.bound_dic[obj_name]
+            self.obj_dict[i]['name'] = obj_name
+            self.obj_dict[i]['boundary_size'] = self.bound_dic[obj_name]
 
-            obj_dict[i]['rect'] = self.caculate_projection_rect(object_matrix,self.bound_dic[obj_name])
+            self.obj_dict[i]['rect'] = self.caculate_projection_rect(object_matrix,self.bound_dic[obj_name])
+            # self.obj_dict[i]['rect'] = self.caculate_projection_rect_1(i)
 
-        return obj_dict
+        return self.obj_dict
 
 
     def euler2rotm(self,theta,position):
@@ -503,21 +504,24 @@ class UR5(object):
         
         return matrix
 
-    def caculate_projection_rect(self,object_matrix,boudary_size):
+
+    def caculate_projection_rect(self,object_matrix,boundary_size):
         obj_points =np.array( [
-                      [boudary_size[0]/2,boudary_size[0]/2,-boudary_size[0]/2,-boudary_size[0]/2,
-                      boudary_size[0]/2,boudary_size[0]/2,-boudary_size[0]/2,-boudary_size[0]/2],
+                      [boundary_size[0]/2,boundary_size[0]/2,-boundary_size[0]/2,-boundary_size[0]/2,
+                      boundary_size[0]/2,boundary_size[0]/2,-boundary_size[0]/2,-boundary_size[0]/2],
 
-                      [boudary_size[1]/2,-boudary_size[0]/2,boudary_size[1]/2,-boudary_size[0]/2,
-                      boudary_size[1]/2,-boudary_size[0]/2,boudary_size[1]/2,-boudary_size[0]/2,],
+                      [boundary_size[1]/2,-boundary_size[0]/2,boundary_size[1]/2,-boundary_size[0]/2,
+                      boundary_size[1]/2,-boundary_size[0]/2,boundary_size[1]/2,-boundary_size[0]/2,],
 
-                      [boudary_size[0]/2,boudary_size[0]/2,boudary_size[0]/2,boudary_size[0]/2,
-                      -boudary_size[0]/2,-boudary_size[0]/2,-boudary_size[0]/2,-boudary_size[0]/2],
+                      [boundary_size[0]/2,boundary_size[0]/2,boundary_size[0]/2,boundary_size[0]/2,
+                      -boundary_size[0]/2,-boundary_size[0]/2,-boundary_size[0]/2,-boundary_size[0]/2],
 
                       [1,1,1,1,1,1,1,1]
                      ])
 
         obj_points_transform = np.dot(object_matrix,obj_points)
+        print("-- obj_points --")
+        print(obj_points_transform)
         obj_x_array = obj_points_transform[0]
         obj_y_array = obj_points_transform[1]
 
@@ -536,19 +540,16 @@ class UR5(object):
         ]
 
         rect1 = np.array(rect).reshape(4,2)
+        print('--- rect1 ---')
+        print(rect1)
         poly = Polygon(rect1).convex_hull
 
         return poly
 
-    
 
-                      
-        
-
- 
     def check_overlap(self,target_order,obj_dict):
         # find the bound of the obj_target
-        target_rect =obj_dict[target_order]['rect']
+        target_rect =self.obj_dict[target_order]['rect']
         target_rect_area = target_rect.area
         overlap_rate = 0
         overlap_order = target_order
@@ -559,7 +560,7 @@ class UR5(object):
                 continue
             # a different obj
             else:
-                cal_rect = obj_dict[order]['rect']
+                cal_rect = self.obj_dict[order]['rect']
                 if not target_rect.intersection(cal_rect): # no overlap
                     continue
                 else:
@@ -570,7 +571,135 @@ class UR5(object):
                         overlap_order = order
                         
         return overlap_rate,overlap_order
+    
+
+    def get_obj_positions_and_orientations_1(self):
+        
+        for i in range(self.num_obj):
+            obj_handle = self.object_handles[i]
+            self.obj_dict[i]['handle'] = obj_handle
+
+            _, object_position = simxGetObjectPosition(self.clientID, obj_handle, -1, simx_opmode_blocking)
+            _, object_orientation = simxGetObjectOrientation(self.clientID, obj_handle, -1, simx_opmode_blocking)
+            self.obj_dict[i]['position'] = object_position
+            self.obj_dict[i]['orientation'] = object_orientation
+
+            object_matrix = self.euler2rotm_1(i)
+            self.obj_dict[i]['matrix'] = object_matrix
+
+            obj_name = self.object_file_name[i]
+
+            self.obj_dict[i]['name'] = obj_name
+            self.obj_dict[i]['boundary_size'] = self.bound_dic[obj_name]
+
+            # self.obj_dict[i]['rect'] = self.caculate_projection_rect(object_matrix,self.bound_dic[obj_name])
+            self.obj_dict[i]['rect'] = self.caculate_projection_rect_1(i)
+
+        return self.obj_dict
+
+    
+    def euler2rotm_1(self,i):
+        """
+            -- Get rotation matrix from euler angles
+        """
+        theta = self.obj_dict[i]['orientation']
+        print(theta)
+        R_x = np.array([[1,         0,                  0                   ],
+                        [0,         math.cos(theta[0]), -math.sin(theta[0]) ],
+                        [0,         math.sin(theta[0]), math.cos(theta[0])  ]
+                        ])
+        R_y = np.array([[math.cos(theta[1]),    0,      math.sin(theta[1])  ],
+                        [0,                     1,      0                   ],
+                        [-math.sin(theta[1]),   0,      math.cos(theta[1])  ]
+                        ])         
+        R_z = np.array([[math.cos(theta[2]),    -math.sin(theta[2]),    0],
+                        [math.sin(theta[2]),    math.cos(theta[2]),     0],
+                        [0,                     0,                      1]
+                        ])            
+        R = np.dot(R_z, np.dot( R_y, R_x ))
+        
+        return R
+
+
+    def caculate_projection_rect_1(self,i):
+        
+        # get the edge lengths of the i_th object
+        edges_lens = self.obj_dict[i]['boundary_size']
+        length = edges_lens[0]
+        width = edges_lens[1]
+        height = edges_lens[2]
+        
+        # get the vertice coordinates in i_th object frame
+        vertices = [
+            [-length/2, -width/2, -height/2],
+            [length/2, -width/2, -height/2],
+            [-length/2, width/2, -height/2],
+            [-length/2, -width/2, height/2],
+            [-length/2, width/2, height/2],
+            [length/2, -width/2, height/2],
+            [length/2, width/2, -height/2],
+            [length/2, width/2, height/2]
+        ]
+        vertices = np.array(vertices).reshape(8,3)
+        # print("-- vertices --")
+        # print(vertices)
+        self.obj_dict[i]['vertices'] = vertices
+
+        R = self.obj_dict[i]['matrix']
+        centre = self.obj_dict[i]['position']
+        # translate into world frame + shift
+        translate_wf = np.dot(vertices, R)
+        translate_wf = np.array(translate_wf + centre)
+        # print("-- translate_wf --")
+        # print(translate_wf)
+
+        # get the max vertices
+        vertices_max = np.amax(translate_wf, 0)
+        vertices_min = np.amin(translate_wf, 0)
+        x_max, y_max = vertices_max[0], vertices_max[1]
+        x_min, y_min = vertices_min[0], vertices_min[1]
+        rect = [
+            x_min, y_min,
+            x_min, y_max,
+            x_max, y_min,
+            x_max, y_max
+        ]
+        rect = np.array(rect).reshape(4,2)
+        polygon = Polygon(rect).convex_hull
+        self.obj_dict[i]['rect'] = polygon
+
+        return polygon
+
                 
+    def check_overlap_1(self, target_id, overlap_threshold=0):
+        # find the bound of the obj_target
+        rect_target = self.obj_dict[target_id]['rect']
+        rect_target_area = rect_target.area
+        target_overlaps = []
+        # overlap_i = target_id
+
+        for i in range(self.num_obj):
+            # check if the ith obj we are looking at is target
+            if i == target_id:
+                continue
+            # a different obj
+            else:
+                rect_i = self.obj_dict[i]['rect']
+                if not rect_target.intersection(rect_i): # no overlap
+                    continue
+                else:
+                    overlap_area = rect_target.intersection(rect_i).area
+                    overlap_rate = overlap_area / rect_target_area
+                    if overlap_rate > overlap_threshold:
+                        # overlap_threshold = overlap_rate
+                        # overlap_i = i
+                        target_overlaps.append(i)
+
+        # target_overlaps contains all obj that overlap target by > overlap threshold
+        self.obj_dict[target_id]['overlaps'] = target_overlaps
+
+        return target_overlaps
+
 
 
 
@@ -622,8 +751,6 @@ class Environment(object):
         elif action_type == 2: #the action is sucking
             suck_point = [action[0],action[1],action[2]]
             self.ur5.ur5suction(suck_point)
-
-
 
 
 
