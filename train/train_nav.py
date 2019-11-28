@@ -15,7 +15,13 @@ from models import get_state, ensure_shared_grads
 from data import load_vocab
 from torch.autograd import Variable
 from tqdm import tqdm
+from models import MultitaskCNN
+import cv2 as cv
 import time
+import sys
+sys.path.append(r'../simulation')
+import enviroment
+from generate_questions import Qusetion
 
 torch.backends.cudnn.enabled = False
 
@@ -34,213 +40,119 @@ except AttributeError:
 
 ################################################################################################
 
-def eval(rank, args, shared_model):
 
-    torch.cuda.set_device(args.gpus.index(args.gpus[rank % len(args.gpus)]))
 
-    if args.model_type == 'pacman':
-
-        model_kwargs = {'question_vocab': load_vocab(args.vocab_json)}
-        model = NavPlannerControllerModel(**model_kwargs)
-
+def _dataset_to_tensor(dset, mask=None, dtype=np.int64):
+    arr = np.asarray(dset, dtype=dtype)
+    if mask is not None:
+        arr = arr[mask]
+    if dtype == np.float32:
+        tensor = torch.FloatTensor(arr)
     else:
+        tensor = torch.LongTensor(arr)
+    return tensor
 
-        exit()
+def test(rank, test_model_dir):
+     model_kwargs = {'question_vocab': load_vocab(args.vocab_json)}
+     model = NavPlannerControllerModel(**model_kwargs)
+     checkpoint  = torch.load(test_model_dir)     #load check point
+     model.load_state_dict(checkpoint['state'])   #create model
 
-    eval_loader_kwargs = {
-        'questions_h5': getattr(args, args.eval_split + '_h5'),
-        'vocab': args.vocab_json,
-        'batch_size': 1,
-        'input_type': args.model_type,
-        'split': args.eval_split,
-        'max_threads_per_gpu': args.max_threads_per_gpu,
-        'gpu_id': args.gpus[rank % len(args.gpus)],
-    }
-
-    eval_loader = EqaDataLoader(**eval_loader_kwargs)
-    print('eval_loader has %d samples' % len(eval_loader.dataset))
-    logging.info("EVAL: eval_loader has {} samples".format(len(eval_loader.dataset)))
-
-    args.output_log_path = os.path.join(args.log_dir,
-                                        'eval_' + str(rank) + '.json')
-
-    t, epoch, best_eval_acc = 0, 0, 0.0
-
-    max_epochs = args.max_epochs
-    if args.mode == 'eval':
-        max_epochs = 1
-    while epoch < int(max_epochs):
-
-        invalids = []
-
-        model.load_state_dict(shared_model.state_dict())
-        model.eval()
-
-        # that's a lot of numbers
-        metrics = NavMetric(
-            info={'split': args.eval_split,
-                  'thread': rank},
-            metric_names=[
-                'd_0_10', 'd_0_30', 'd_0_50', 'd_T_10', 'd_T_30', 'd_T_50',
-                'd_D_10', 'd_D_30', 'd_D_50', 'd_min_10', 'd_min_30',
-                'd_min_50', 'r_T_10', 'r_T_30', 'r_T_50', 'r_e_10', 'r_e_30',
-                'r_e_50', 'stop_10', 'stop_30', 'stop_50', 'ep_len_10',
-                'ep_len_30', 'ep_len_50'
-            ],
-            log_json=args.output_log_path)
-
-        if 'pacman' in args.model_type:
-
-            done = False
-
-            while done == False:
-                if args.overfit:
-                    metrics = NavMetric(
-                        info={'split': args.eval_split,
-                              'thread': rank},
-                        metric_names=[
-                            'd_0_10', 'd_0_30', 'd_0_50', 'd_T_10', 'd_T_30', 'd_T_50',
-                            'd_D_10', 'd_D_30', 'd_D_50', 'd_min_10', 'd_min_30',
-                            'd_min_50', 'r_T_10', 'r_T_30', 'r_T_50', 'r_e_10', 'r_e_30',
-                            'r_e_50', 'stop_10', 'stop_30', 'stop_50', 'ep_len_10',
-                            'ep_len_30', 'ep_len_50'
-                        ],
-                        log_json=args.output_log_path)
-
-                for batch in tqdm(eval_loader):
-
-                    model.load_state_dict(shared_model.state_dict())
-                    model.cuda()
-
-                    idx, question, answer, actions, action_length = batch
-                    metrics_slug = {}
+     cnn_kwargs = {'num_classes': 191, 'pretrained': True}
+     cnn = MultitaskCNN(**cnn_kwargs)
+     cnn.eval()
+     cnn.cuda()                   #create cnn model
 
 
-                    # evaluate at multiple initializations
-                    for i in [10, 30, 50]:
+     scene = "test-10-obj-10.txt"
+     my_env = enviroment.Environment(is_testing=0,testing_file = scene)
+     object_exist_list = my_env.ur5.object_type
+     print("the objetct which is exist:")
+     print(object_exist_list)                    #create simulation enviroment
 
-                        t += 1
+     my_question =Qusetion(object_exist_list)   #create testing question
+     testing_questions  = my_question.createQueue()
+     vocab = my_question.create_vocab()
 
-                        if i > action_length[0]:
-                            invalids.append([idx[0], i])
-                            continue
+     action_in_raw =[1,1,1,1,1]    #start action_in
+     action_out_raw = [0,0,0,0,0]
+     action_in_tensor = _dataset_to_tensor(action_in_raw)
+     action_out_tensor = _dataset_to_tensor(action_out_raw)
+     action_in = Variable(action_in_tensor)
+     action_out = Variable(action_out_tensor)
+     action_in = action_in.unsqueeze(0)
+     action_in = action_in.unsqueeze(0)
+     #print(action_in.size())
 
-                        question_var = Variable(question.cuda())
+     planner_hidden = None
+     max_action = 3
 
-                        controller_step = False
-                        planner_hidden = model.planner_nav_rnn.init_hidden(1)
+     for question in testing_questions:
+        action_times = 0
+        print(question['question'])
+        questionTokens = my_question.tokenize(
+                question['question'], punctToRemove=['?'], addStartToken=False)
+        encoded_question_raw = my_question.encode(questionTokens, vocab['questionTokenToIdx'])
+        encoded_question_raw.append(0)                     #encode question
+        encoded_question_raw = np.array(encoded_question_raw)
+        encoded_question_tensor = _dataset_to_tensor(encoded_question_raw)
+        encoded_question = Variable(encoded_question_tensor)
+        encoded_question = encoded_question.unsqueeze(0)
 
-                        # get hierarchical action history
-                        (
-                            planner_actions_in, planner_img_feats,
-                        ) = eval_loader.dataset.get_hierarchical_features_till_spawn(
-                            actions[0, :action_length[0] + 1].numpy(), i, args.max_controller_actions
-                        )
+        while(action_times < max_action):       
+            _,rgb_image_raw = my_env.camera.get_camera_data()      
+            shrink = cv.resize(rgb_image_raw,(224,224),interpolation=cv.INTER_AREA)
+            shrink = np.array(shrink)
+            shrink = shrink.transpose((2,0,1))
+            shrink = shrink.reshape(1,3,224,224)
+            shrink = (shrink/255.0).astype(np.float32)
+                  #resize image 
+            planner_img_feats = cnn(
+                        Variable(torch.FloatTensor(shrink)
+                                 .cuda())).data.cpu().numpy().copy()  
+            planner_img_feats_var =Variable(torch.FloatTensor(planner_img_feats))
 
-                        planner_actions_in_var = Variable(
-                            planner_actions_in.cuda())
-                        planner_img_feats_var = Variable(
-                            planner_img_feats.cuda())
+            planner_img_feats_var =  planner_img_feats_var.unsqueeze(0)
+            
+            #print(planner_img_feats_var.size())
 
-                        # forward planner till spawn to update hidden state
-                        for step in range(planner_actions_in.size(0)):
+            action_out_raw, planner_hidden = model.planner_step(encoded_question,planner_img_feats_var,action_in,planner_hidden)
+            
+            print(action_out_raw.size())
 
-                            planner_scores, planner_hidden = model.planner_step(
-                                question_var, planner_img_feats_var[step]
-                                .unsqueeze(0).unsqueeze(0),
-                                planner_actions_in_var[step].view(1, 1),
-                                planner_hidden
-                            )
+            action_out = F.sigmoid(action_out_raw)
 
+            
 
-                        for step in range(args.max_episode_length):
-                            if not first_step:
-                                img = torch.from_numpy(img.transpose(
-                                    2, 0, 1)).float() / 255.0
-                                img_feat_var = eval_loader.dataset.cnn(
-                                    Variable(img.view(1, 3, 224,
-                                                      224).cuda())).view(
-                                                          1, 1, 3200)
-                            else:
-                                img_feat_var = Variable(controller_img_feats.cuda()).view(1, 1, 3200)
+            action_get =action_out.data.numpy()
 
- 
-                            if planner_step:
-                                if not first_step:
-                                    action_in = torch.LongTensor(
-                                        1, 1).fill_(action + 1).cuda()
-                                    planner_scores, planner_hidden = model.planner_step(
-                                        question_var, img_feat_var,
-                                        Variable(action_in), planner_hidden)
+            action_position = np.array(action_get[0][0:4])
+            action_position = (action_position*256).astype(np.int32)
+            max_position = np.max(action_position)
+            action_type = int(action_get[0][4]*2)
 
-                                prob = F.softmax(planner_scores, dim=1)
-                                action = int(
-                                    prob.max(1)[1].data.cpu().numpy()[0])
-                                planner_actions.append(action)
-
-                            episode_done = action == 3 or episode_length >= args.max_episode_length
-
-                            episode_length += 1
+            print("type")
+            print(action_type)
+            print("position")
+            print(action_position)
+            '''
+            if action_type == 0:  #stop action
+                print('stop')
+                break
+            else:
+            '''
+            if max_position > 20:
+                my_env.UR5_action(action_position,1)   #output action
+                action_times +=1
+                action_in = action_out_raw.unsqueeze(0)
+            else: 
+                action_in = action_out_raw.unsqueeze(0)
+                break
 
 
 
 
-                    # collate and update metrics
-                    metrics_list = []
-                    for i in metrics.metric_names:
-                        if i not in metrics_slug:
-                            metrics_list.append(metrics.metrics[
-                                metrics.metric_names.index(i)][0])
-                        else:
-                            metrics_list.append(metrics_slug[i])
 
-                    # update metrics
-                    metrics.update(metrics_list)
-
-                try:
-                    print(metrics.get_stat_string(mode=0))
-                    logging.info("EVAL: metrics: {}".format(metrics.get_stat_string(mode=0)))
-                except:
-                    pass
-
-                print('epoch', epoch)
-                print('invalids', len(invalids))
-                logging.info("EVAL: epoch {}".format(epoch))
-                logging.info("EVAL: invalids {}".format(invalids))
-
-                # del h3d
-                eval_loader.dataset._load_envs()
-                if len(eval_loader.dataset.pruned_env_set) == 0:
-                    done = True
-
-        epoch += 1
-
-        # checkpoint if best val loss
-        if metrics.metrics[8][0] > best_eval_acc:  # d_D_50
-            best_eval_acc = metrics.metrics[8][0]
-            if epoch % args.eval_every == 0 and args.log == True:
-                metrics.dump_log()
-
-                model_state = get_state(model)
-
-                aad = dict(args.__dict__)
-                ad = {}
-                for i in aad:
-                    if i[0] != '_':
-                        ad[i] = aad[i]
-
-                checkpoint = {'args': ad, 'state': model_state, 'epoch': epoch}
-
-                checkpoint_path = '%s/epoch_%d_d_D_50_%.04f.pt' % (
-                    args.checkpoint_dir, epoch, best_eval_acc)
-                print('Saving checkpoint to %s' % checkpoint_path)
-                logging.info("EVAL: Saving checkpoint to {}".format(checkpoint_path))
-                torch.save(checkpoint, checkpoint_path)
-
-        print('[best_eval_d_D_50:%.04f]' % best_eval_acc)
-        logging.info("EVAL: [best_eval_d_D_50:{:.04f}]".format(best_eval_acc))
-
-        eval_loader.dataset._load_envs(start_idx=0, in_order=True)
 
 
 def train(rank, args, shared_model):
@@ -251,13 +163,10 @@ def train(rank, args, shared_model):
         model = NavPlannerControllerModel(**model_kwargs)
 
     else:
-
         exit()
 
-# loss function
-    lossFn = torch.nn.CrossEntropyLoss().cuda()
+    lossFn = torch.nn.MSELoss(reduction='none').cuda()
 
-#optimization function
     optim = torch.optim.Adamax(
         filter(lambda p: p.requires_grad, shared_model.parameters()),
         lr=args.learning_rate)
@@ -267,7 +176,6 @@ def train(rank, args, shared_model):
         'vocab': args.vocab_json,
         'batch_size': args.batch_size,
         'input_type': args.model_type,
-        'map_resolution': args.map_resolution,
         'split': 'train',
         'max_threads_per_gpu': args.max_threads_per_gpu,
         'gpu_id': args.gpus[rank % len(args.gpus)]
@@ -300,90 +208,76 @@ def train(rank, args, shared_model):
     t, epoch = 0, 0
 
     while epoch < int(args.max_epochs):
+        planner_lossFn = torch.nn.MSELoss(reduction='none').cuda()
+        for batch in train_loader:
+            t += 1
+            model.load_state_dict(shared_model.state_dict())
+            model.train()
+            model.cuda()
 
-        if 'pacman' in args.model_type:
+            idx, questions,_,planner_img_feats, planner_actions_in, planner_actions_out, planner_action_lengths, planner_masks  = batch
 
-            planner_lossFn = MaskedNLLCriterion().cuda()
-            controller_lossFn = MaskedNLLCriterion().cuda()
-            # two model， planner gives action , controller judge stop condition
-
-            done = False
-
-            while done == False:
-
-                for batch in train_loader:
-
-                    t += 1
-
-                    model.load_state_dict(shared_model.state_dict())
-                    model.train()
-                    model.cuda()
-
-                    # load data in a batch .cuda， the container of a batch
-                    idx, questions, _, planner_img_feats, planner_actions_in, 
-                        planner_actions_out, planner_action_lengths, planner_masks, 
-                        planner_hidden_idx = batch
-
-                    # calcualte var of input data(qustion,action,image)   
-                    questions_var = Variable(questions.cuda())
-                    planner_img_feats_var = Variable(planner_img_feats.cuda())
-                    planner_actions_in_var = Variable(
-                        planner_actions_in.cuda())
-                    planner_actions_out_var = Variable(
-                        planner_actions_out.cuda())
-                    planner_action_lengths = planner_action_lengths.cuda()    #?
-                    planner_masks_var = Variable(planner_masks.cuda())
+            # calcualte var of input data(qustion,action,image)  
+            questions_var = Variable(questions.cuda())
+            planner_img_feats_var = Variable(planner_img_feats.cuda())
+            planner_actions_in_var = Variable(
+                planner_actions_in.cuda())
+            planner_actions_out_var = Variable(
+                planner_actions_out.cuda())
+            planner_action_lengths = planner_action_lengths.cuda()    #
+            planner_masks_var = Variable(planner_masks.cuda())
 
 
-                    # find the question and image that need most action
-                    planner_action_lengths, perm_idx = planner_action_lengths.sort(
-                        0, descending=True) 
+            # find the question and image that need most action
+            planner_action_lengths, perm_idx = planner_action_lengths.sort(
+                0, descending=True) 
 
-                    questions_var = questions_var[perm_idx]
+            questions_var = questions_var[perm_idx]
 
-                    planner_img_feats_var = planner_img_feats_var[perm_idx]
-                    planner_actions_in_var = planner_actions_in_var[perm_idx]
-                    planner_actions_out_var = planner_actions_out_var[perm_idx]
-                    planner_masks_var = planner_masks_var[perm_idx]
+            planner_img_feats_var = planner_img_feats_var[perm_idx]
+            planner_actions_in_var = planner_actions_in_var[perm_idx]
+            planner_actions_out_var = planner_actions_out_var[perm_idx]
+            planner_masks_var = planner_masks_var[perm_idx]
 
-                    #calculate the model score using the action with lagest length
-                    planner_scores, planner_hidden = model(      
-                        questions_var, planner_img_feats_var,
-                        planner_actions_in_var,
-                        planner_action_lengths.cpu().numpy())
+            #calculate the model score using the action with lagest length
+            planner_scores, planner_hidden = model(      
+                questions_var, planner_img_feats_var,
+                planner_actions_in_var,
+                planner_action_lengths.cpu().numpy().astype(np.long))
 
-                    planner_logprob = F.log_softmax(planner_scores, dim=1)
-
-
-                    planner_loss = planner_lossFn(
-                        planner_logprob,
-                        planner_actions_out_var[:, :planner_action_lengths.max(
-                        )].contiguous().view(-1, 1),
-                        planner_masks_var[:, :planner_action_lengths.max()]
-                        .contiguous().view(-1, 1))
+            planner_logprob = F.sigmoid(planner_scores)
 
 
-                    # zero grad
-                    optim.zero_grad()
+            planner_loss = planner_lossFn(
+                planner_logprob.view(-1,4,5),
+                planner_actions_out_var.float())
+            planner_loss = planner_loss.mean(2)
+            #print(planner_logprob.view(-1,4,5).size())
+            #print(planner_actions_out_var.size())
+            #print(planner_masks_var.size())
+            #print(planner_loss.size())
+            planner_loss = planner_loss * planner_masks_var.float()[:,:-1]
+            planner_loss = planner_loss.mean()
+            #TODO masked
 
-                    # update metrics
-                    metrics.update(
-                        planner_loss.data[0])
-                    logging.info("TRAINING PACMAN planner-loss:".format(planner_loss.data[0]))
 
-                    # backprop and update
-                    (planner_loss).backward()
+            # zero grad
+            optim.zero_grad()
+
+            # update metrics
+            print("TRAINING PACMAN planner-loss:{}".format(planner_loss.item()))
+            logging.info("TRAINING PACMAN planner-loss:{}".format(planner_loss.item()))
+
+            # backprop and update
+            (planner_loss).backward()
 
 
-                    ensure_shared_grads(model.cpu(), shared_model)
-                    optim.step()
+            ensure_shared_grads(model.cpu(), shared_model)
+            optim.step()
 
-                    if t % args.print_every == 0:
-                        print(metrics.get_stat_string())
-                        logging.info("TRAIN: metrics: {}".format(metrics.get_stat_string()))
-                        if args.log == True:
-                            metrics.dump_log()
-
+            #if t % args.print_every == 0:
+            #    print(metrics.get_stat_string())
+            #    logging.info("TRAIN: metrics: {}".format(metrics.get_stat_string()))
 
         epoch += 1
 
@@ -399,9 +293,9 @@ def train(rank, args, shared_model):
                     ad[i] = aad[i]
 
             checkpoint = {'args': ad,
-                          'state': model_state,
-                          'epoch': epoch,
-                          'optimizer': optimizer_state}
+                    'state': model_state,
+                    'epoch': epoch,
+                    'optimizer': optimizer_state}
 
             checkpoint_path = '%s/epoch_%d_thread_%d.pt' % (
                 args.checkpoint_dir, epoch, rank)
@@ -416,34 +310,35 @@ if __name__ == '__main__':
     parser.add_argument('-train_h5', default='data/train.h5')
     parser.add_argument('-val_h5', default='data/val.h5')
     parser.add_argument('-test_h5', default='data/test.h5')
-    parser.add_argument('-vocab_json', default='data/vocab.json')
+
+    parser.add_argument('-vocab_json', default='vocab.json')
 
 
     parser.add_argument(
         '-mode',
-        default='train',
+        default='test',
         type=str,
-        choices=['train', 'eval', 'train+eval'])
+        choices=['train', 'eval', 'train+eval','test'])
     parser.add_argument('-eval_split', default='val', type=str)
 
     # model details
     parser.add_argument(
         '-model_type',
-        default='cnn',
+        default='pacman',
         choices=['cnn', 'cnn+q', 'lstm', 'lstm+q', 'lstm-mult+q', 'pacman'])
     parser.add_argument('-max_episode_length', default=100, type=int)
     parser.add_argument('-curriculum', default=0, type=int)
 
     # optim params
-    parser.add_argument('-batch_size', default=20, type=int)
+    parser.add_argument('-batch_size', default=132, type=int)
     parser.add_argument('-learning_rate', default=1e-3, type=float)
-    parser.add_argument('-max_epochs', default=1000, type=int)
+    parser.add_argument('-max_epochs', default=10000, type=int)
 
 
     # bookkeeping
     parser.add_argument('-print_every', default=5, type=int)
     parser.add_argument('-eval_every', default=1, type=int)
-    parser.add_argument('-save_every', default=1000, type=int) #optional if you would like to save specific epochs as opposed to relying on the eval thread
+    parser.add_argument('-save_every', default=100, type=int) #optional if you would like to save specific epochs as opposed to relying on the eval thread
     parser.add_argument('-identifier', default='cnn')
     parser.add_argument('-num_processes', default=1, type=int)
     parser.add_argument('-max_threads_per_gpu', default=10, type=int)
@@ -457,7 +352,8 @@ if __name__ == '__main__':
     parser.add_argument('-max_controller_actions', type=int, default=5)
     parser.add_argument('-max_actions', type=int)
     args = parser.parse_args()
-
+    
+    args.train_h5 = os.path.abspath(args.train_h5)
     args.time_id = time.strftime("%m_%d_%H:%M")
 
     #MAX_CONTROLLER_ACTIONS = args.max_controller_actions
@@ -472,7 +368,7 @@ if __name__ == '__main__':
                                                 str(datetime.now()).replace(' ', '_'))),
                         level=logging.INFO,
                         format='%(asctime)-15s %(message)s')
-
+    os.environ['CUDA_VISIBLE_DEVICES']='0'
     try:
         args.gpus = os.environ['CUDA_VISIBLE_DEVICES'].split(',')
         args.gpus = [int(x) for x in args.gpus]
@@ -546,6 +442,10 @@ if __name__ == '__main__':
 
         else:
             train(0, args, shared_model)
+
+    elif args.mode == 'test':
+        test_model_dir = "epoch_10000_thread_0.pt"
+        test(0,test_model_dir)
 
     else:
         processes = []

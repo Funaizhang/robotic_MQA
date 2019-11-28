@@ -18,6 +18,34 @@ from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 import pdb
 
+def build_mlp(input_dim,
+              hidden_dims,
+              output_dim,
+              use_batchnorm=False,
+              dropout=0,
+              add_sigmoid=1):
+    layers = []
+    D = input_dim
+    if dropout > 0:
+        layers.append(nn.Dropout(p=dropout))
+    if use_batchnorm:
+        layers.append(nn.BatchNorm1d(input_dim))
+    for dim in hidden_dims:
+        layers.append(nn.Linear(D, dim))
+        if use_batchnorm:
+            layers.append(nn.BatchNorm1d(dim))
+        if dropout > 0:
+            layers.append(nn.Dropout(p=dropout))
+        layers.append(nn.ReLU(inplace=True))
+        D = dim
+    layers.append(nn.Linear(D, output_dim))
+
+    if add_sigmoid == 1:
+        layers.append(nn.Sigmoid())
+
+    return nn.Sequential(*layers)
+
+
 
 
 
@@ -247,7 +275,6 @@ class MultitaskCNN(nn.Module):
     def forward(self, x):
 
         assert self.training == False
-
         conv1 = self.conv_block1(x)
         conv2 = self.conv_block2(conv1)
         conv3 = self.conv_block3(conv2)
@@ -355,7 +382,15 @@ class NavRnn(nn.Module):
                   (self.rnn_type, rnn_input_dim))
 
         if self.action_input == True:
-            self.action_embed = nn.Embedding(num_actions, action_embed_dim)
+
+            ##############
+            #self.action_embed = nn.Embedding(num_actions, action_embed_dim)
+            ##############
+
+            ##############
+            self.action_embed = nn.Linear(5, action_embed_dim)
+            ##############
+
             rnn_input_dim += action_embed_dim
             print('Adding input to %s: action, rnn dim: %d' % (self.rnn_type,
                                                                rnn_input_dim))
@@ -369,7 +404,7 @@ class NavRnn(nn.Module):
         print('Building %s with hidden dim: %d' % (self.rnn_type,
                                                    rnn_hidden_dim))
 
-        self.decoder = nn.Linear(self.rnn_hidden_dim, self.num_actions)
+        self.decoder = nn.Linear(self.rnn_hidden_dim, 5)
 
     def init_hidden(self, bsz):
         weight = next(self.parameters()).data
@@ -395,7 +430,7 @@ class NavRnn(nn.Module):
         T = False
         if self.image_input == True:
             N, T, _ = img_feats.size()
-            input_feats = img_feats
+            input_feats = img_feats.float()
 
         if self.question_input == True:
             N, D = question_feats.size()
@@ -406,19 +441,17 @@ class NavRnn(nn.Module):
             if len(input_feats) == 0:
                 input_feats = question_feats
             else:
-                input_feats = torch.cat([input_feats, question_feats], 2)
+                input_feats = torch.cat([input_feats, question_feats.float()], 2)
 
         if self.action_input == True:
             if len(input_feats) == 0:
                 input_feats = self.action_embed(actions_in)
             else:
-                input_feats = torch.cat(
-                    [input_feats, self.action_embed(actions_in)], 2)
-
+                input_feats = torch.cat([input_feats, self.action_embed(actions_in.float())], 2)
         packed_input_feats = pack_padded_sequence(
             input_feats, action_lengths, batch_first=True)
         packed_output, hidden = self.rnn(packed_input_feats)
-        rnn_output, _ = pad_packed_sequence(packed_output, batch_first=True)
+        rnn_output, _ = pad_packed_sequence(packed_output, batch_first=True, total_length=4)
         output = self.decoder(rnn_output.contiguous().view(
             rnn_output.size(0) * rnn_output.size(1), rnn_output.size(2)))
 
@@ -444,14 +477,14 @@ class NavRnn(nn.Module):
             if len(input_feats) == 0:
                 input_feats = question_feats
             else:
-                input_feats = torch.cat([input_feats, question_feats], 2)
+                input_feats = torch.cat([input_feats, question_feats.float()], 2)
 
         if self.action_input == True:
             if len(input_feats) == 0:
                 input_feats = self.action_embed(actions_in)
             else:
                 input_feats = torch.cat(
-                    [input_feats, self.action_embed(actions_in)], 2)
+                    [input_feats, self.action_embed(actions_in.float())], 2)
 
         output, hidden = self.rnn(input_feats, hidden)
 
@@ -519,14 +552,13 @@ class NavPlannerControllerModel(nn.Module):
                 planner_img_feats,
                 planner_actions_in,
                 planner_action_lengths,
-                planner_hidden_index,
+                planner_hidden_index=None,
                 planner_hidden=False):
 
         # ts = time.time()
         planner_img_feats = self.cnn_fc_layer(planner_img_feats)
         ques_feats = self.q_rnn(questions)
         ques_feats = self.ques_tr(ques_feats)
-
         planner_states, planner_scores, planner_hidden = self.planner_nav_rnn(
             planner_img_feats, ques_feats, planner_actions_in,
             planner_action_lengths)
@@ -540,12 +572,7 @@ class NavPlannerControllerModel(nn.Module):
         ques_feats = self.ques_tr(ques_feats)
         planner_scores, planner_hidden = self.planner_nav_rnn.step_forward(
             img_feats, ques_feats, actions_in, planner_hidden)
-
-
-
-
-# ----------- VQA -----------
-
+        return planner_scores, planner_hidden
 
 class VqaLstmModel(nn.Module):
     def __init__(self,
@@ -626,6 +653,7 @@ class VqaLstmCnnAttentionModel(nn.Module):
 
         self.att = nn.Sequential(
             nn.Tanh(), nn.Dropout(p=0.5), nn.Linear(128, 1))
+        print('fuck!!')
 
     def forward(self, images, questions):
 
@@ -658,4 +686,6 @@ class VqaLstmCnnAttentionModel(nn.Module):
         scores = self.classifier(mul_feats)
 
         return scores, att_probs
+
+
 

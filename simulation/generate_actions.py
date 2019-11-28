@@ -8,6 +8,7 @@ import sys
 import numpy as np
 import math
 import cv2 as cv
+from scipy.interpolate import interp1d
 
 
 
@@ -34,7 +35,7 @@ class best_action():
         ],                                                         # the objects that are likely to be covered
         'cover':[
              'bottle', 'cup', 'calculator','key','pen',
-            'cube',  'mouse', 'scissors', 'stapler'
+            'cube',  'mouse', 'scissors', 'stapler','keyboard'
         ]       
         }
 
@@ -49,52 +50,93 @@ class best_action():
         '''
         obj_order = 0
         all_action  = []    #datas of all quesions in a scene
+        push_mask = []
+        suck_mask = []
+        initial_x = 0.0
+        initial_y = 0.5 #128/256
+
+        for i in range(21):     #get mask of pushing action and sucking action
+            push_mask.append(1)
+        push_mask.append(0)
+        for i in range(10):
+            suck_mask.append(1)
+        for i in range(12):
+            suck_mask.append(0)
+
+        print(suck_mask)
+        print(push_mask)
+
+
+        robot_position = []
+        actions_mask = []
+        actions_data = []
+
+
+
+
         for ques in self.question_dic:
             episode_rgb_images=[]
             actions_data = []    #start
-            actions_mask = []
+
             ans = ques['answer']
             question = ques['question']
             action_times = 0
             if ques['type'] == 'exist_positive':  
-                action_position = []
-                action_times = 0
+
+                robot_position.append([initial_x,initial_y])   #start
+                _,rgb_image_raw = self.my_env.camera.get_camera_data()
+                rgb_image = np.array(rgb_image_raw)
+                episode_rgb_images.append(rgb_image)         #start image
+
+
                 ques_object = ques['obj'] 
                 obj_order = self.my_env.ur5.object_type.index(ques['obj'])
                 print(".............")
                 print(ques_object)
+
                 if ques_object not in self.object_character['cover']:
                     print("can not be covered")
-                    actions_data.append([0,0,0,0,0])   #stop
-                    actions_mask.append(1)
-                    _,rgb_image_raw = self.my_env.camera.get_camera_data()
+                    actions_data = [[1,1],[0,0]]    #no action
+                    actions_mask = [1,0]
+                    robot_position.append([initial_x,initial_y]) 
+
+                    _,rgb_image_raw = self.my_env.camera.get_camera_data()   #end image
                     rgb_image = np.array(rgb_image_raw)
                     episode_rgb_images.append(rgb_image)
                 else: 
-                    action_position,act_type,act_name = self.is_targetobject_overlap(obj_order)
+                    action_position,act_type,act_name,act_data = self.is_targetobject_overlap(obj_order)
                     if act_type == 0:  #no covered
                         print("no cover")
-                        actions_data.append([0,0,0,0,0])   #stop
-                        actions_mask.append(1)
-                        _,rgb_image_raw = self.my_env.camera.get_camera_data()
+                        actions_data = [[1,1],[0,0]]    #no action
+                        actions_mask = [1,0]
+
+                        _,rgb_image_raw = self.my_env.camera.get_camera_data()   #end image
                         rgb_image = np.array(rgb_image_raw)
                         episode_rgb_images.append(rgb_image)
-                    else:
-                        while (act_type!=0) and (action_times<self.most_action):
+                        robot_position.append([initial_x,initial_y]) 
+
+                    elif act_type == 1: #pushing
                             print("%s cover"%(act_name))
-                            _,rgb_image_raw = self.my_env.camera.get_camera_data()
-                            rgb_image = np.array(rgb_image_raw)
+
                             self.my_env.UR5_action(action_position,act_type)
+                            actions_data = act_data
+                            actions_mask = push_mask
+
+                            _,rgb_image_raw = self.my_env.camera.get_camera_data()   #image before pushing
+                            rgb_image = np.array(rgb_image_raw)
+                            for i in range(10):
+                                episode_rgb_images.append(rgb_image)
+
+
                             for i in range(4):
-                                action_position[i] = action_position[i]/128
+                                action_position[i] = action_position[i]/256
                             action_position.append(act_type)                          
-                            actions_data.append(action_position)
-                            actions_mask.append(1)                
-                            episode_rgb_images.append(rgb_image)
+                            actions_data.append(action_position)                
                             action_position,act_type,act_name = self.is_targetobject_overlap(obj_order)
                             action_times += 1
+                        
                         actions_data.append([0,0,0,0,0])  #stop
-                        actions_mask.append(1)
+                        action_times+=1
                         _,rgb_image_raw = self.my_env.camera.get_camera_data()
                         rgb_image = np.array(rgb_image_raw)
                         episode_rgb_images.append(rgb_image)
@@ -105,29 +147,42 @@ class best_action():
             elif ques['type'] == 'exist_negative':
                 print("...............")
                 print("no action")
-                actions_data.append([0,0,0,0,0])    #stop
+                actions_data.append([1,1,1,1,1])    #start
                 actions_mask.append(1)
                 _,rgb_image_raw = self.my_env.camera.get_camera_data()
                 rgb_image = np.array(rgb_image_raw)
                 episode_rgb_images.append(rgb_image)
-                action_times = 0
 
-            while(len(actions_data)<4):
-                actions_data.append([0,0,0,0,0])  #stop
+                actions_data.append([0,0,0,0,0])    #stop
+                actions_mask.append(0)
+                action_times = 2
+                _,rgb_image_raw = self.my_env.camera.get_camera_data()
+                rgb_image = np.array(rgb_image_raw)
+                episode_rgb_images.append(rgb_image)
+
+
+            episode_rgb_images_shrink =[]
+            while(len(actions_data)<5):
+                actions_data.append([0,0,0,0,0])  #add mask
                 actions_mask.append(0)
                 _,rgb_image_raw = self.my_env.camera.get_camera_data()
                 rgb_image = np.array(rgb_image_raw)
                 episode_rgb_images.append(rgb_image)
 
-            if(len(episode_rgb_images)!=4):
-                print("error")
+            for image in episode_rgb_images:
+                shrink = cv.resize(image,(224,224),interpolation=cv.INTER_AREA)
+                shrink = np.array(shrink)
+                shrink = shrink.transpose((2,0,1))
+                shrink = (shrink/255.0).astype(np.float16)
+                episode_rgb_images_shrink.append(shrink)
+
  
             result = {
                         "actions": actions_data,
                         "mask": actions_mask,
-                        "action_length":action_times,
+                        "action_length":action_times-1,
                         "answer": ans,
-                        "rgb_images": episode_rgb_images,
+                        "rgb_images": episode_rgb_images_shrink,
                         "question": question,
                 }
         
@@ -146,9 +201,9 @@ class best_action():
         action_position = [0,0,0,0]
         action_obj_name =''
 
-        if overlap_rate < 0.4:    #no cover
+        if overlap_rate < 0.1:    #no cover
             ant_type =0
-            action_position = [0,0,0,0]
+            action_position = [0,0,0,0]   #STOP
         else:
 
             obj_cover_type = self.my_env.ur5.object_type[overlap_order]
@@ -160,11 +215,44 @@ class best_action():
             if obj_cover_type  in self.object_character['suck']:
                 ant_type = 2
                 action_position = obj_cover_position + obj_cover_position
+                position_before = [0,128]
+                dx,dy = self.caculate_dx(obj_cover_position,position_before)
+                actions_data = [[1,1]]    #start 
+                for i in range(10):
+                    actions_data.append([dx,dy])
+                actions_data.append([0,0])  #end
+
             else:
                 ant_type = 1
                 action_position = target_position+ obj_cover_position
+                position_before = [0,128]
+                dx,dy = self.caculate_dx(obj_cover_position,position_before)
+                dx_1,dy_1 = self.caculate_dx(target_position,obj_cover_position)
+                actions_data = [[1,1]]  #start
+                for i in range(10):
+                    actions_data.append([dx,dy])
+                for i in range(10):
+                    actions_data.append([dx_1,dy_1])
+                actions_data.append([0,0]) #end
+                
+                
         action_obj_name = obj_dic[overlap_order]['name']
-        return action_position,ant_type,action_obj_name
+        return action_position,ant_type,action_obj_name,actions_data
+
+
+    def caculate_dx(self,position,position_before):
+        x = position[0]
+        y = position[1]
+        x_before = position_before[0]
+        y_before = position_before[1]
+        step_size = 10.0
+        nomal_ratio = 25.6
+        dx = (x-x_before)/step_size
+        dy = (y-y_before)/step_size
+        dx = dx/nomal_ratio
+        dy = dy/nomal_ratio
+        return dx,dy
+        
 
 
         

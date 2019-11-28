@@ -80,6 +80,7 @@ class EqaDataset(Dataset):
     def __init__(self,
                  questions_h5,
                  vocab,
+                 num_frames=1,
                  split='train',
                  gpu_id=0,
                  input_type='ques',
@@ -92,6 +93,7 @@ class EqaDataset(Dataset):
         
         self.split = split
         self.gpu_id = gpu_id
+        self.num_frames = num_frames
 
         self.input_type = input_type
 
@@ -100,12 +102,12 @@ class EqaDataset(Dataset):
 
 
         print('Reading question data into memory')
-        self.idx = _dataset_to_tensor(questions_h5['idx'])
         self.questions = _dataset_to_tensor(questions_h5['questions'])
         self.answers = _dataset_to_tensor(questions_h5['answers'])
-        self.actions = _dataset_to_tensor(questions_h5['action_labels'])
-        self.action_lengths = _dataset_to_tensor(questions_h5['action_lengths'])
-        self.action_images = questions_h5['action_images']
+        self.actions = _dataset_to_tensor(questions_h5['actions'])
+        self.action_length = _dataset_to_tensor(questions_h5['action_length'])
+        self.action_masks = _dataset_to_tensor(questions_h5['mask'])
+        self.action_images = questions_h5['images']
 
         #if input_type != 'ques':
         '''
@@ -124,40 +126,18 @@ class EqaDataset(Dataset):
         self.cnn.cuda()
 
 
-
-
-
-    def get_hierarchical_features_till_spawn(self, actions,):
-
-        images = self.get_frames(
-            self.episode_house,
-            self.episode_pos_queue,
-            preprocess=True)
-
-        raw_img_feats = self.cnn(
-            Variable(torch.FloatTensor(images)
-                     .cuda())).data.cpu().numpy().copy()
-
-        img_num = len(actions)
-        planner_img_feats = torch.from_numpy(raw_img_feats[img_num].copy())
-        planner_actions_in = torch.from_numpy(np.array(actions))
-
-        return planner_actions_in, planner_img_feats, 
-
-
+    
     def __getitem__(self, index):
         # [VQA] question-only
         if self.input_type in ['pacman']:
 
-            idx = self.idx[index]
+            idx = index
             question = self.questions[index]
+            #answer = self.answers[index]
             answer = self.answers[index]
-            action_length = self.action_lengths[index]
+            action_length = self.action_length[index]
             actions = self.actions[index]
-
-            planner_actions = self.planner_actions[index]
-            planner_action_length = self.planner_action_lengths[index]
-            planner_hidden_idx = self.planner_hidden_idx[index]
+            actions_masks = self.action_masks[index]
 
 
             if self.split in ['val', 'test']:    #return the data directly
@@ -168,23 +148,41 @@ class EqaDataset(Dataset):
                 planner_img_feats = self.cnn(
                         Variable(torch.FloatTensor(planner_images)
                                  .cuda())).data.cpu().numpy().copy()                              
-                planner_actions_in = planner_actions.clone() - 1
-                planner_actions_out = planner_actions[1:].clone() - 2
-                planner_actions_in[planner_action_length:].fill_(0)
-                planner_mask = planner_actions_out.clone().gt(-1)            
-                if len(planner_actions_out) > planner_action_length:      #pruned
-                    planner_actions_out[planner_action_length:].fill_(0)
+                actions_in = actions.clone()
+                actions_out = actions[1:].clone()
+                actions_in[action_length:].fill_(0)
+                actions_masks = actions_masks.clone()
+                if len(actions_out) > action_length-1:  #pruned
+                    actions_out[action_length-1:].fill_(0)
                      
             return (idx, question, answer, planner_img_feats,
-                    planner_actions_in, planner_actions_out,
-                    planner_action_length, planner_mask,  planner_hidden_idx)
-        
+                    actions_in, actions_out,
+                    action_length, actions_masks)
+
+        elif self.input_type == 'ques,image':
+            idx = index
+            question = self.questions[index]
+            answer = self.answers[index]
+
+            action_length = self.action_length[index]
+            actions = self.actions[index]
+
+            actions_in = actions[action_length - self.num_frames:action_length]
+            actions_out = actions[action_length - self.num_frames + 1:
+                                  action_length + 1]
+
+            images = self.action_images[index][action_length-self.num_frames:action_length].astype(np.float32)
+
+            return (idx, question, answer, images, actions_in, actions_out,
+                    action_length)
+
+
 
     def __len__(self):
         if self.input_type == 'ques':
             return len(self.questions)
         else:
-            return len(self.available_idx)
+            return len(self.questions)
 
 
 class EqaDataLoader(DataLoader):
@@ -225,16 +223,17 @@ class EqaDataLoader(DataLoader):
 
 
         print('Reading questions from ', questions_h5_path)
-        with h5py.File(questions_h5_path, 'r') as questions_h5:
-            self.dataset = EqaDataset(
-                questions_h5,
-                vocab,
-                split=split,
-                gpu_id=gpu_id,
-                input_type=input_type,
-                max_threads_per_gpu=max_threads_per_gpu,
-                map_resolution=map_resolution,
-                )
+        questions_h5 = h5py.File(questions_h5_path, 'r')
+        self.dataset = EqaDataset(
+            questions_h5,
+            vocab,
+            num_frames=kwargs.pop('num_frames'),
+            split=split,
+            gpu_id=gpu_id,
+            input_type=input_type,
+            max_threads_per_gpu=max_threads_per_gpu,
+            map_resolution=map_resolution,
+            )
 
         super(EqaDataLoader, self).__init__(self.dataset, **kwargs)
 

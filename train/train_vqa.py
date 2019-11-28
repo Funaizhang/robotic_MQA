@@ -1,3 +1,9 @@
+# Copyright (c) Facebook, Inc. and its affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 import h5py
 import time
 import argparse
@@ -37,7 +43,6 @@ def eval(rank, args, shared_model):
 
     eval_loader_kwargs = {
         'questions_h5': getattr(args, args.eval_split + '_h5'),
-        'data_json': args.data_json,
         'vocab': args.vocab_json,
         'batch_size': 1,
         'input_type': args.input_type,
@@ -45,7 +50,6 @@ def eval(rank, args, shared_model):
         'split': args.eval_split,
         'max_threads_per_gpu': args.max_threads_per_gpu,
         'gpu_id': args.gpus[rank%len(args.gpus)],
-        'to_cache': args.cache
     }
 
     eval_loader = EqaDataLoader(**eval_loader_kwargs)
@@ -91,7 +95,8 @@ def eval(rank, args, shared_model):
 
         elif args.input_type == 'ques,image':
             done = False
-            all_envs_loaded = eval_loader.dataset._check_if_all_envs_loaded()
+            all_envs_loaded = True
+            #all_envs_loaded = eval_loader.dataset._check_if_all_envs_loaded()
 
             while done == False:
                 for batch in eval_loader:
@@ -170,7 +175,6 @@ def train(rank, args, shared_model):
 
     train_loader_kwargs = {
         'questions_h5': args.train_h5,
-        'data_json': args.data_json,
         'vocab': args.vocab_json,
         'batch_size': args.batch_size,
         'input_type': args.input_type,
@@ -178,7 +182,6 @@ def train(rank, args, shared_model):
         'split': 'train',
         'max_threads_per_gpu': args.max_threads_per_gpu,
         'gpu_id': args.gpus[rank%len(args.gpus)],
-        'to_cache': args.cache
     }
 
     args.output_log_path = os.path.join(args.log_dir,
@@ -189,10 +192,8 @@ def train(rank, args, shared_model):
               'thread': rank},
         metric_names=['loss', 'accuracy', 'mean_rank', 'mean_reciprocal_rank'],
         log_json=args.output_log_path)
-
+    print('[TRAIN_LOADER] start')
     train_loader = EqaDataLoader(**train_loader_kwargs)
-    if args.input_type == 'ques,image':
-        train_loader.dataset._load_envs(start_idx=0, in_order=True)
 
     print('train_loader has %d samples' % len(train_loader.dataset))
 
@@ -239,7 +240,8 @@ def train(rank, args, shared_model):
         elif args.input_type == 'ques,image':
 
             done = False
-            all_envs_loaded = train_loader.dataset._check_if_all_envs_loaded()
+            all_envs_loaded = True
+            #all_envs_loaded = train_loader.dataset._check_if_all_envs_loaded()
 
             while done == False:
 
@@ -266,7 +268,7 @@ def train(rank, args, shared_model):
 
                     # update metrics
                     accuracy, ranks = metrics.compute_ranks(scores.data.cpu(), answers)
-                    metrics.update([loss.data[0], accuracy, ranks, 1.0 / ranks])
+                    metrics.update([loss.item(), accuracy, ranks, 1.0 / ranks])
 
                     # backprop and update
                     loss.backward()
@@ -310,7 +312,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '-input_type', default='ques,image', choices=['ques', 'ques,image'])
     parser.add_argument(
-        '-num_frames', default=5,
+        '-num_frames', default=1,
         type=int)  # -1 = all frames of navigation sequence
 
     # optim params
@@ -334,7 +336,6 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     args.time_id = time.strftime("%m_%d_%H:%M")
-
     try:
         args.gpus = os.environ['CUDA_VISIBLE_DEVICES'].split(',')
         args.gpus = [int(x) for x in args.gpus]
@@ -374,7 +375,9 @@ if __name__ == '__main__':
     elif args.input_type == 'ques,image':
 
         model_kwargs = {'vocab': load_vocab(args.vocab_json)}
+        print('[CREATE] SHARED MODEL')
         shared_model = VqaLstmCnnAttentionModel(**model_kwargs)
+        print('[FINISH] SHARED MODEL')
 
     if args.checkpoint_path != False:
         print('Loading params from checkpoint: %s' % args.checkpoint_path)
@@ -391,15 +394,17 @@ if __name__ == '__main__':
         processes = []
 
         # Start the eval thread
-        p = mp.Process(target=eval, args=(0, args, shared_model))
-        p.start()
-        processes.append(p)
+        print('START')
+        #p = mp.Process(target=eval, args=(0, args, shared_model))
+        #p.start()
+        #processes.append(p)
 
         # Start the training thread(s)
         for rank in range(1, args.num_processes + 1):
-            p = mp.Process(target=train, args=(rank, args, shared_model))
-            p.start()
-            processes.append(p)
+            #p = mp.Process(target=train, args=(rank, args, shared_model))
+            #p.start()
+            #processes.append(p)
+            train(rank, args, shared_model)
 
-        for p in processes:
-            p.join()
+        #for p in processes:
+        #    p.join()

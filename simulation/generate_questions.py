@@ -139,6 +139,7 @@ class Qusetion():
         all_qns = self.queryExist()
         print(all_qns)
         json.dump(all_qns, open(self.question_outputJson, 'w'))
+        return all_qns
 
 
 

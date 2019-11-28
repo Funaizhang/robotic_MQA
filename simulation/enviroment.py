@@ -39,8 +39,8 @@ class Camera(object):
         self.Save_PATH_DEPTH = r'./depth'
         self.Dis_FAR = 10
         self.depth_scale = 1000
-        self.Img_WIDTH = 128
-        self.Img_HEIGHT = 128
+        self.Img_WIDTH = 256
+        self.Img_HEIGHT = 256
         self.border_pos = [120,375,100,430]# [68,324,112,388] #up down left right of the box
         self.theta = 70
         self.Camera_NAME = r'kinect'
@@ -227,6 +227,7 @@ class UR5(object):
         self.targetPosition = np.zeros(3,dtype = np.float)
         self.targetQuaternion = np.array([0.707,0,0.707,0])
         self.baseName = r'UR5'
+        self.IkName = r'UR5_ikTip'
         table_file = os.path.abspath('../mesh/tables/tables.txt')
         bound_dir = os.path.abspath("../mesh/boundary_size.json")
         bound_file = open(bound_dir,encoding='utf-8')
@@ -236,7 +237,7 @@ class UR5(object):
         file.close()
         self.table_para = file_content[0].split()    
         self.workspace_limits = np.asarray([[float(self.table_para[0]), float(self.table_para[1])], [float(self.table_para[2]), float(self.table_para[3])] ])
-        self.drop_height = float(self.table_para[4])+0.05
+        self.drop_height =0.1
         self.color_space = np.asarray([[78.0, 121.0, 167.0],  # blue
                                        [89.0, 161.0, 79.0],  # green
                                        [156, 117, 95],  # brown
@@ -251,7 +252,7 @@ class UR5(object):
         self.test_file_dir = os.path.abspath('test-cases/')
         self.test_preset_file = os.path.join(self.test_file_dir, self.testing_file)
         self.obj_mesh_dir=os.path.abspath('../mesh/exist')
-        self.num_obj = 10
+        self.num_obj = 14
 
         self.obj_dict = defaultdict(dict)
         self.mesh_list = os.listdir(self.obj_mesh_dir)
@@ -294,8 +295,13 @@ class UR5(object):
             print ('Failed connecting to remote API server')
         _, self.ur5_handle = simxGetObjectHandle(self.clientID,self.baseName,simx_opmode_oneshot_wait)
         _, self.ur5_position = simxGetObjectPosition(self.clientID,self.ur5_handle,-1,simx_opmode_oneshot_wait)
+        self.Ik_handle = simxGetObjectHandle(self.clientID,self.IkName,simx_opmode_oneshot_wait)
         self.add_objects()
         self.ankleinit()
+
+    def getur5_position(self):
+        ur5_position = simxGetObjectPosition(self.clientID,self.IkName,-1,simx_opmode_oneshot_wait)
+
 
 
     def ankleinit(self):
@@ -594,20 +600,45 @@ class Environment(object):
 
     def UR5_action(self,action,action_type):   #1:push 2:suck 3:loose
         if action_type == 1:   # the action is pushing
-            push_depth=0
+            push_depth=-0.1
             start_point = [action[0],action[1]]
             end_point = [action[2],action[3]]
             move_begin = self.camera.pixel2world(start_point[0], start_point[1], push_depth)
             move_to = self.camera.pixel2world(end_point[0], end_point[1], push_depth)
-            self.ur5.ur5push(move_begin, move_to)
+
+            self.ur5.break_condition(1) 
+            time.sleep(1)       
+            self.ur5.ur5moveto(move_begin)
+            time.sleep(0.5)
+            _,rgb_image_before = self.camera.get_camera_data()
+            self.ur5.ur5moveto(move_to)
+            time.sleep(0.5)
+            _,rgb_image_after = self.camera.get_camera_data()
+           # Return to the initial pose
+            self.ur5.ankleinit()
             print('\n -- Push from {} to {}' .format(start_point,end_point))
-            return move_begin, move_to
+            
+            return rgb_image_before, rgb_image_after
+        
         elif action_type == 2: #the action is sucking
             suck_point = [action[0],action[1]]
             move_to= self.camera.pixel2world(suck_point[0], suck_point[1], -0.1)
-            self.ur5.ur5suction(move_to)
+
+            self.ur5moveto(suction_point)
+            time.sleep(1)
+            self.break_condition(0)
+            time.sleep(1)
+            # suction
+            # Return to the initial pose with the object
+            self.ankleinit()
+
+
+
+            
+            self.ur5.break_condition(1)
             print('\n -- suck in {} ' .format(suck_point))
             return move_to
+
         elif action_type == 4: #the action is loosing
             loose_point = [action[0],action[1]]
             move_to= self.camera.pixel2world(loose_point[0], loose_point[1], 0)
