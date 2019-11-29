@@ -32,7 +32,7 @@ all_data = my_action.generate_best_action()
 images = []
 questions =[]
 actions = []
-action_length =[]
+robot_positions =[]
 mask = []
 answers =[]
 for data in all_data:
@@ -49,20 +49,32 @@ for data in all_data:
 
     actions.append(data['actions'])
     mask.append(data['mask'])
-    action_length.append(data['action_length'])
+    robot_positions.append(data['robot_positions'])
+    '''
     print(data['actions'])
     print(data['mask'])
-    print(data['action_length'])
+    print(data['robot_positions'])
     print(len(data['rgb_images']))
     print(encoded_question)
     print("...........")
+    '''
+    if len(data['actions']) != 22:
+        print('ASB')
+    if len(data['mask']) != 22:
+        print('MSB')
+        print(len(data['mask']))
+    if len(data['robot_positions']) !=22:
+        print('RSB')
+        print(len(data['robot_positions']))
+    if len(data['rgb_images']) !=22:
+        print('ISB')
+        print(len(data['rgb_images']))
 
-
-f  = h5py.File("scene05.h5",'w')
+f  = h5py.File("scene00.h5",'w')
 f['images'] = images
 f['questions'] = questions
 f['actions']  = actions
-f['action_length'] = action_length
+f['robot_positions'] = robot_positions
 f['mask'] = mask
 f['answers'] = answers
                     

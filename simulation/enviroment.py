@@ -624,20 +624,17 @@ class Environment(object):
             suck_point = [action[0],action[1]]
             move_to= self.camera.pixel2world(suck_point[0], suck_point[1], -0.1)
 
-            self.ur5moveto(suction_point)
+            self.ur5.ur5moveto(move_to)
             time.sleep(1)
-            self.break_condition(0)
+            self.ur5.break_condition(0)
             time.sleep(1)
             # suction
             # Return to the initial pose with the object
-            self.ankleinit()
-
-
-
-            
+            self.ur5.ankleinit()            
             self.ur5.break_condition(1)
+            _,rgb_image_after = self.camera.get_camera_data()
             print('\n -- suck in {} ' .format(suck_point))
-            return move_to
+            return rgb_image_after
 
         elif action_type == 4: #the action is loosing
             loose_point = [action[0],action[1]]

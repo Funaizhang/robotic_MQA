@@ -100,6 +100,7 @@ class best_action():
                     actions_mask = [1,0]
                     robot_position.append([initial_x,initial_y]) 
 
+                    robot_position.append([initial_x,initial_y])
                     _,rgb_image_raw = self.my_env.camera.get_camera_data()   #end image
                     rgb_image = np.array(rgb_image_raw)
                     episode_rgb_images.append(rgb_image)
@@ -110,6 +111,7 @@ class best_action():
                         actions_data = [[1,1],[0,0]]    #no action
                         actions_mask = [1,0]
 
+                        robot_position.append([initial_x,initial_y])
                         _,rgb_image_raw = self.my_env.camera.get_camera_data()   #end image
                         rgb_image = np.array(rgb_image_raw)
                         episode_rgb_images.append(rgb_image)
@@ -118,56 +120,93 @@ class best_action():
                     elif act_type == 1: #pushing
                             print("%s cover"%(act_name))
 
-                            self.my_env.UR5_action(action_position,act_type)
+                            
                             actions_data = act_data
                             actions_mask = push_mask
 
+                            dx = act_data[0][0]*25.6
+                            dy = act_data[0][1]*25.6
+
                             _,rgb_image_raw = self.my_env.camera.get_camera_data()   #image before pushing
                             rgb_image = np.array(rgb_image_raw)
+
                             for i in range(10):
                                 episode_rgb_images.append(rgb_image)
+                                robot_position.append([(0+dx*i)/256.0,(128+dy*i)/256.0])    #little moving before pushing
+
+                            img_before,img_after = self.my_env.UR5_action(action_position,act_type)
+
+                            dx1 = act_data[12][0]*25.6
+                            dy1 = act_data[12][0]*25.6
+                            cover_x = action_position[0]
+                            cover_y = action_position[1]
+                            target_x = action_position[2]
+                            target_y = action_position[3]
 
 
-                            for i in range(4):
-                                action_position[i] = action_position[i]/256
-                            action_position.append(act_type)                          
-                            actions_data.append(action_position)                
-                            action_position,act_type,act_name = self.is_targetobject_overlap(obj_order)
-                            action_times += 1
-                        
-                        actions_data.append([0,0,0,0,0])  #stop
-                        action_times+=1
-                        _,rgb_image_raw = self.my_env.camera.get_camera_data()
-                        rgb_image = np.array(rgb_image_raw)
-                        episode_rgb_images.append(rgb_image)
+                            for i in range(10):
+                                episode_rgb_images.append(img_before)
+                                robot_position.append([(cover_x+dx1*i)/256.0,(cover_y+dy1*i)/256.0])    #little moving during pushing
 
+                            episode_rgb_images.append(img_after)
+                            episode_rgb_images.append(img_after)
+                            robot_position.append([target_x,target_y])
+
+                    elif act_type == 2: #sucking
+                            print("%s cover"%(act_name))
+                           
+                            actions_data = act_data
+                            actions_mask = suck_mask
+
+                            dx = act_data[0][0]*25.6
+                            dy = act_data[0][1]*25.6
+
+                            _,rgb_image_raw = self.my_env.camera.get_camera_data()   #image before sucking
+                            rgb_image = np.array(rgb_image_raw)
+
+                            for i in range(10):
+                                episode_rgb_images.append(rgb_image)
+                                robot_position.append([(0+dx*i)/256.0,(128+dy*i)/256.0])    #little moving before sucking
+
+                            img_after = self.my_env.UR5_action(action_position,act_type)
+
+                            target_x = action_position[0]
+                            target_y = action_position[1]
+
+                            for i in range(12):
+                                episode_rgb_images.append(img_after)
+                                robot_position.append([target_x,target_y])
                    
-               
+                            
+        
 
             elif ques['type'] == 'exist_negative':
                 print("...............")
                 print("no action")
-                actions_data.append([1,1,1,1,1])    #start
-                actions_mask.append(1)
+                robot_position.append([initial_x,initial_y])   #start
                 _,rgb_image_raw = self.my_env.camera.get_camera_data()
                 rgb_image = np.array(rgb_image_raw)
-                episode_rgb_images.append(rgb_image)
+                episode_rgb_images.append(rgb_image)         #start image
 
-                actions_data.append([0,0,0,0,0])    #stop
-                actions_mask.append(0)
-                action_times = 2
-                _,rgb_image_raw = self.my_env.camera.get_camera_data()
+                actions_data = [[1,1],[0,0]]    #no action
+                actions_mask = [1,0]
+
+                robot_position.append([initial_x,initial_y])   #end
+                _,rgb_image_raw = self.my_env.camera.get_camera_data()   #end image
                 rgb_image = np.array(rgb_image_raw)
                 episode_rgb_images.append(rgb_image)
+                robot_position.append([initial_x,initial_y]) 
+
 
 
             episode_rgb_images_shrink =[]
-            while(len(actions_data)<5):
-                actions_data.append([0,0,0,0,0])  #add mask
+            while(len(actions_data)<22):
+                actions_data.append([0,0])  #add mask
                 actions_mask.append(0)
                 _,rgb_image_raw = self.my_env.camera.get_camera_data()
                 rgb_image = np.array(rgb_image_raw)
                 episode_rgb_images.append(rgb_image)
+                robot_position.append([initial_x,initial_y])
 
             for image in episode_rgb_images:
                 shrink = cv.resize(image,(224,224),interpolation=cv.INTER_AREA)
@@ -180,7 +219,7 @@ class best_action():
             result = {
                         "actions": actions_data,
                         "mask": actions_mask,
-                        "action_length":action_times-1,
+                        "robot_positions":robot_position,
                         "answer": ans,
                         "rgb_images": episode_rgb_images_shrink,
                         "question": question,
@@ -200,6 +239,7 @@ class best_action():
         ant_type = 0
         action_position = [0,0,0,0]
         action_obj_name =''
+        actions_data = []
 
         if overlap_rate < 0.1:    #no cover
             ant_type =0
