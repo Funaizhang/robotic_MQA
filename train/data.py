@@ -104,10 +104,11 @@ class EqaDataset(Dataset):
         print('Reading question data into memory')
         self.questions = _dataset_to_tensor(questions_h5['questions'])
         self.answers = _dataset_to_tensor(questions_h5['answers'])
-        self.actions = _dataset_to_tensor(questions_h5['actions'])
-        self.action_length = _dataset_to_tensor(questions_h5['action_length'])
+        self.actions = _dataset_to_tensor(questions_h5['actions'],dtype = np.float32)
         self.action_masks = _dataset_to_tensor(questions_h5['mask'])
+        self.robot_positions = _dataset_to_tensor(questions_h5['robot_positions'],dtype = np.float32)
         self.action_images = questions_h5['images']
+        self.action_lengths = _dataset_to_tensor(questions_h5['action_lengths'])
 
         #if input_type != 'ques':
         '''
@@ -135,13 +136,14 @@ class EqaDataset(Dataset):
             question = self.questions[index]
             #answer = self.answers[index]
             answer = self.answers[index]
-            action_length = self.action_length[index]
             actions = self.actions[index]
             actions_masks = self.action_masks[index]
+            robot_positions = self.robot_positions[index]
+            action_lengths = self.action_lengths[index]
 
 
             if self.split in ['val', 'test']:    #return the data directly
-                return (idx, question, answer, actions, action_length)  
+                return (idx, question, answer, actions, robot_positions,action_lengths)  
 
             if self.split == 'train':                      #get iamge from data_set
                 planner_images = self.action_images[index]
@@ -150,31 +152,13 @@ class EqaDataset(Dataset):
                                  .cuda())).data.cpu().numpy().copy()                              
                 actions_in = actions.clone()
                 actions_out = actions[1:].clone()
-                actions_in[action_length:].fill_(0)
                 actions_masks = actions_masks.clone()
-                if len(actions_out) > action_length-1:  #pruned
-                    actions_out[action_length-1:].fill_(0)
+                robot_positions = robot_positions.clone()
                      
             return (idx, question, answer, planner_img_feats,
                     actions_in, actions_out,
-                    action_length, actions_masks)
+                   robot_positions, actions_masks,action_lengths)
 
-        elif self.input_type == 'ques,image':
-            idx = index
-            question = self.questions[index]
-            answer = self.answers[index]
-
-            action_length = self.action_length[index]
-            actions = self.actions[index]
-
-            actions_in = actions[action_length - self.num_frames:action_length]
-            actions_out = actions[action_length - self.num_frames + 1:
-                                  action_length + 1]
-
-            images = self.action_images[index][action_length-self.num_frames:action_length].astype(np.float32)
-
-            return (idx, question, answer, images, actions_in, actions_out,
-                    action_length)
 
 
 
@@ -227,7 +211,6 @@ class EqaDataLoader(DataLoader):
         self.dataset = EqaDataset(
             questions_h5,
             vocab,
-            num_frames=kwargs.pop('num_frames'),
             split=split,
             gpu_id=gpu_id,
             input_type=input_type,

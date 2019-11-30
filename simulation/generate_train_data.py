@@ -17,8 +17,8 @@ for scene in scene_list:
     my_question =Qusetion(object_exist_list)
     my_action = best_action(my_enviroment)
 '''
-scene = "test-10-obj-00.txt"
-my_enviroment = enviroment.Environment(is_testing=1,testing_file = scene)
+scene = "test-10-obj-41.txt"
+my_enviroment = enviroment.Environment(is_testing=0,testing_file = scene)
 object_exist_list = my_enviroment.ur5.object_type
 print("the objetct which is exist:")
 print(object_exist_list)
@@ -35,6 +35,7 @@ actions = []
 robot_positions =[]
 mask = []
 answers =[]
+action_lengths = []
 for data in all_data:
     images.append(data['rgb_images'])
     questionTokens = my_question.tokenize(
@@ -50,6 +51,8 @@ for data in all_data:
     actions.append(data['actions'])
     mask.append(data['mask'])
     robot_positions.append(data['robot_positions'])
+    action_lengths.append(data['action_lengths'])
+    
     '''
     print(data['actions'])
     print(data['mask'])
@@ -70,13 +73,14 @@ for data in all_data:
         print('ISB')
         print(len(data['rgb_images']))
 
-f  = h5py.File("scene00.h5",'w')
+f  = h5py.File("scene41.h5",'w')
 f['images'] = images
 f['questions'] = questions
 f['actions']  = actions
 f['robot_positions'] = robot_positions
 f['mask'] = mask
 f['answers'] = answers
+f['action_lengths'] = action_lengths
                     
 
 

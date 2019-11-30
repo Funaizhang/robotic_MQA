@@ -344,6 +344,8 @@ class NavRnn(nn.Module):
                  question_embed_dim=128,
                  action_input=False,
                  action_embed_dim=32,
+                 position_input=True,
+                 position_dim = 2,
                  num_actions=4,
                  mode='sl',
                  rnn_type='LSTM',
@@ -361,6 +363,9 @@ class NavRnn(nn.Module):
 
         self.action_input = action_input
         self.action_embed_dim = action_embed_dim
+
+        self.position_input = position_input
+        self.position_dim = position_dim
 
         self.num_actions = num_actions
 
@@ -388,12 +393,18 @@ class NavRnn(nn.Module):
             ##############
 
             ##############
-            self.action_embed = nn.Linear(5, action_embed_dim)
+            self.action_embed = nn.Linear(2, action_embed_dim)
             ##############
 
             rnn_input_dim += action_embed_dim
             print('Adding input to %s: action, rnn dim: %d' % (self.rnn_type,
                                                                rnn_input_dim))
+
+        if self.position_input == True:
+            rnn_input_dim += position_dim
+            print('Adding input to %s: position, rnn dim: %d' % (self.rnn_type,
+                                                               rnn_input_dim))
+
 
         self.rnn = getattr(nn, self.rnn_type)(
             rnn_input_dim,
@@ -404,7 +415,7 @@ class NavRnn(nn.Module):
         print('Building %s with hidden dim: %d' % (self.rnn_type,
                                                    rnn_hidden_dim))
 
-        self.decoder = nn.Linear(self.rnn_hidden_dim, 5)
+        self.decoder = nn.Linear(self.rnn_hidden_dim, 2)
 
     def init_hidden(self, bsz):
         weight = next(self.parameters()).data
@@ -423,6 +434,7 @@ class NavRnn(nn.Module):
                 img_feats,
                 question_feats,
                 actions_in,
+                position_feats,
                 action_lengths,
                 hidden=False):
         input_feats = Variable()
@@ -448,10 +460,19 @@ class NavRnn(nn.Module):
                 input_feats = self.action_embed(actions_in)
             else:
                 input_feats = torch.cat([input_feats, self.action_embed(actions_in.float())], 2)
+
+        if self.position_input == True:
+            if len(input_feats) == 0:
+                input_feats = position_feats
+            else:
+                input_feats = torch.cat([input_feats, position_feats], 2)
+
+            
         packed_input_feats = pack_padded_sequence(
-            input_feats, action_lengths, batch_first=True)
+            input_feats,action_lengths, batch_first=True)
         packed_output, hidden = self.rnn(packed_input_feats)
-        rnn_output, _ = pad_packed_sequence(packed_output, batch_first=True, total_length=4)
+        rnn_output, _ = pad_packed_sequence(packed_output, batch_first=True, total_length=21)
+
         output = self.decoder(rnn_output.contiguous().view(
             rnn_output.size(0) * rnn_output.size(1), rnn_output.size(2)))
 
@@ -460,7 +481,7 @@ class NavRnn(nn.Module):
         else:
             return output, hidden
 
-    def step_forward(self, img_feats, question_feats, actions_in, hidden):
+    def step_forward(self, img_feats, question_feats, actions_in,position_feats, hidden):
         input_feats = Variable()
 
         T = False
@@ -486,6 +507,12 @@ class NavRnn(nn.Module):
                 input_feats = torch.cat(
                     [input_feats, self.action_embed(actions_in.float())], 2)
 
+        if self.position_input == True:
+            if len(input_feats) == 0:
+                input_feats = position_feats
+            else:
+                input_feats = torch.cat([input_feats, position_feats], 2)
+
         output, hidden = self.rnn(input_feats, hidden)
 
         output = self.decoder(output.contiguous().view(
@@ -506,6 +533,7 @@ class NavPlannerControllerModel(nn.Module):
                  question_dropout=0.5,
                  planner_rnn_image_feat_dim=128,
                  planner_rnn_action_embed_dim=32,
+                 planner_rnn_position_dim =2,
                  planner_rnn_type='GRU',
                  planner_rnn_hidden_dim=1024,
                  planner_rnn_num_layers=1,
@@ -539,6 +567,8 @@ class NavPlannerControllerModel(nn.Module):
             question_embed_dim=question_hidden_dim,
             action_input=True,
             action_embed_dim=planner_rnn_action_embed_dim,
+            position_input=True,
+            position_dim=planner_rnn_position_dim,
             num_actions=num_output,
             rnn_type=planner_rnn_type,
             rnn_hidden_dim=planner_rnn_hidden_dim,
@@ -551,6 +581,7 @@ class NavPlannerControllerModel(nn.Module):
                 questions,
                 planner_img_feats,
                 planner_actions_in,
+                planner_positions,
                 planner_action_lengths,
                 planner_hidden_index=None,
                 planner_hidden=False):
@@ -561,17 +592,17 @@ class NavPlannerControllerModel(nn.Module):
         ques_feats = self.ques_tr(ques_feats)
         planner_states, planner_scores, planner_hidden = self.planner_nav_rnn(
             planner_img_feats, ques_feats, planner_actions_in,
-            planner_action_lengths)
+            planner_positions,planner_action_lengths)
      
         return planner_scores, planner_hidden
 
-    def planner_step(self, questions, img_feats, actions_in, planner_hidden):
+    def planner_step(self, questions, img_feats, actions_in,planner_positions, planner_hidden):
 
         img_feats = self.cnn_fc_layer(img_feats)
         ques_feats = self.q_rnn(questions)
         ques_feats = self.ques_tr(ques_feats)
         planner_scores, planner_hidden = self.planner_nav_rnn.step_forward(
-            img_feats, ques_feats, actions_in, planner_hidden)
+            img_feats, ques_feats, actions_in, planner_positions,planner_hidden)
         return planner_scores, planner_hidden
 
 class VqaLstmModel(nn.Module):

@@ -215,7 +215,7 @@ def train(rank, args, shared_model):
             model.train()
             model.cuda()
 
-            idx, questions,_,planner_img_feats, planner_actions_in, planner_actions_out, planner_action_lengths, planner_masks  = batch
+            idx, questions,_,planner_img_feats, planner_actions_in, planner_actions_out, planner_positions, planner_masks,planner_action_lengths  = batch
 
             # calcualte var of input data(qustion,action,image)  
             questions_var = Variable(questions.cuda())
@@ -224,11 +224,14 @@ def train(rank, args, shared_model):
                 planner_actions_in.cuda())
             planner_actions_out_var = Variable(
                 planner_actions_out.cuda())
-            planner_action_lengths = planner_action_lengths.cuda()    #
+            planner_positions_var = Variable(
+            planner_positions.cuda())
             planner_masks_var = Variable(planner_masks.cuda())
+            planner_action_lengths = planner_action_lengths.cuda()    #
 
 
             # find the question and image that need most action
+            
             planner_action_lengths, perm_idx = planner_action_lengths.sort(
                 0, descending=True) 
 
@@ -238,18 +241,25 @@ def train(rank, args, shared_model):
             planner_actions_in_var = planner_actions_in_var[perm_idx]
             planner_actions_out_var = planner_actions_out_var[perm_idx]
             planner_masks_var = planner_masks_var[perm_idx]
+            planner_positions_var = planner_positions_var[perm_idx]
+            '''
+            print('action')
+            print(planner_actions_in_var)
+            print('positions')
+            print(planner_positions_var)
+            '''
 
             #calculate the model score using the action with lagest length
             planner_scores, planner_hidden = model(      
                 questions_var, planner_img_feats_var,
                 planner_actions_in_var,
-                planner_action_lengths.cpu().numpy().astype(np.long))
+                planner_positions_var, planner_action_lengths.cpu().numpy().astype(np.long))
 
             planner_logprob = F.sigmoid(planner_scores)
 
 
             planner_loss = planner_lossFn(
-                planner_logprob.view(-1,4,5),
+                planner_logprob.view(-1,21,2),
                 planner_actions_out_var.float())
             planner_loss = planner_loss.mean(2)
             #print(planner_logprob.view(-1,4,5).size())
@@ -307,7 +317,7 @@ def train(rank, args, shared_model):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     # data params
-    parser.add_argument('-train_h5', default='data/train.h5')
+    parser.add_argument('-train_h5', default='scene00.h5')
     parser.add_argument('-val_h5', default='data/val.h5')
     parser.add_argument('-test_h5', default='data/test.h5')
 
@@ -316,7 +326,7 @@ if __name__ == '__main__':
 
     parser.add_argument(
         '-mode',
-        default='test',
+        default='train',
         type=str,
         choices=['train', 'eval', 'train+eval','test'])
     parser.add_argument('-eval_split', default='val', type=str)
@@ -330,7 +340,7 @@ if __name__ == '__main__':
     parser.add_argument('-curriculum', default=0, type=int)
 
     # optim params
-    parser.add_argument('-batch_size', default=132, type=int)
+    parser.add_argument('-batch_size', default=4, type=int)
     parser.add_argument('-learning_rate', default=1e-3, type=float)
     parser.add_argument('-max_epochs', default=10000, type=int)
 
