@@ -89,6 +89,8 @@ def eval(rank, args, shared_model):
                 scores = model(questions_var)
                 loss = lossFn(scores, answers_var)
 
+                print(scores)
+
                 # update metrics
                 accuracy, ranks = metrics.compute_ranks(
                     scores.data.cpu(), answers)
@@ -260,12 +262,18 @@ def train(rank, args, shared_model):
 
                     idx, questions, answers, images, _, _, _ = batch
 
+                    print('--- images dim {}'.format(images.size()))
+
                     questions_var = Variable(questions.cuda())
                     answers_var = Variable(answers.cuda())
                     images_var = Variable(images.cuda())
 
                     scores, att_probs = model(images_var, questions_var)
                     loss = lossFn(scores, answers_var)
+
+                    print('--- att_probs: {}.'.format(att_probs))
+                    # print('--- answers_var: {}.'.format(answers_var))
+                    # print('--- loss: {}.'.format(loss))
 
                     # zero grad
                     optim.zero_grad()

@@ -274,7 +274,7 @@ class MultitaskCNN(nn.Module):
 
     def forward(self, x):
 
-        assert self.training == False
+        # assert self.training == False
         conv1 = self.conv_block1(x)
         conv2 = self.conv_block2(conv1)
         conv3 = self.conv_block3(conv2)
@@ -687,15 +687,14 @@ class VqaLstmCnnAttentionModel(nn.Module):
 
         self.att = nn.Sequential(
             nn.Tanh(), nn.Dropout(p=0.5), nn.Linear(128, 1))
-        print('fuck!!')
+        # print('fuck!!')
 
     def forward(self, images, questions):
 
         N, T, _, _, _ = images.size()
 
         # bs x 5 x 3 x 224 x 224
-        img_feats = self.cnn(images.contiguous().view(
-            -1, images.size(2), images.size(3), images.size(4)))
+        img_feats = self.cnn(images.contiguous().view(-1, images.size(2), images.size(3), images.size(4)))
         img_feats = self.cnn_fc_layer(img_feats)
 
         img_feats_tr = self.img_tr(img_feats)

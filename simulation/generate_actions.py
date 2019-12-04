@@ -50,21 +50,8 @@ class best_action():
         '''
         obj_order = 0
         all_action  = []    #datas of all quesions in a scene
-        push_mask = []
-        suck_mask = []
         initial_x = 0.0
         initial_y = 0.0 
-
-        for i in range(21):     #get mask of pushing action and sucking action
-            push_mask.append(1)
-        push_mask.append(0)
-        for i in range(11):
-            suck_mask.append(1)
-        for i in range(11):
-            suck_mask.append(0)
-
-        print(suck_mask)
-        print(push_mask)
 
         for ques in self.question_dic:
             robot_position = []
@@ -73,7 +60,6 @@ class best_action():
             episode_rgb_images=[]
             actions_data = []    #start
             action_lengths = 0
-
             ans = ques['answer']
             question = ques['question']
 
@@ -90,7 +76,7 @@ class best_action():
                     episode_rgb_images.append(rgb_image)         #start image
 
                     print("can not be covered")
-                    actions_data = [[1,1],[0,0]]    #no action
+                    actions_data = [0,9]    #no action
                     actions_mask = [1,0]
 
                     robot_position.append([initial_x,initial_y])
@@ -99,7 +85,7 @@ class best_action():
                     episode_rgb_images.append(rgb_image)
                     action_lengths = 1
                 else: 
-                    action_position,act_type,act_name,act_data = self.is_targetobject_overlap(obj_order)
+                    action_position,act_type,act_name,act_data,mask,positions,act_length = self.is_targetobject_overlap(obj_order)
                     if act_type == 0:  #no covered
                         robot_position.append([initial_x,initial_y])   #start
                         _,rgb_image_raw = self.my_env.camera.get_camera_data()
@@ -107,7 +93,7 @@ class best_action():
                         episode_rgb_images.append(rgb_image)         #start image
                                         
                         print("no cover")
-                        actions_data = [[1,1],[0,0]]    #no action
+                        actions_data = [0,9]    #no action
                         actions_mask = [1,0]
 
                         robot_position.append([initial_x,initial_y]) 
@@ -119,69 +105,38 @@ class best_action():
 
                     elif act_type == 1: #pushing
                             print("%s cover"%(act_name))
-
                             
                             actions_data = act_data
-                            actions_mask = push_mask
+                            actions_mask = mask
+                            robot_position = positions
+                            action_lengths = act_length
 
-                            dx = act_data[1][0]*25.6
-                            dy = act_data[1][1]*25.6
+                            _,rgb_image = self.my_env.camera.get_camera_data()   #image before pushing
+                            for i in range(action_lengths):
+                                episode_rgb_images.append(rgb_image) 
 
-                            _,rgb_image_raw = self.my_env.camera.get_camera_data()   #image before pushing
-                            rgb_image = np.array(rgb_image_raw)
+                            _,img_after = self.my_env.UR5_action(action_position,act_type)
+                            for i in range(40-action_lengths):
+                                episode_rgb_images.append(img_after)  
 
-                            for i in range(11):
-                                episode_rgb_images.append(rgb_image)
-                                robot_position.append([(0+dx*i)/256.0,(0+dy*i)/256.0])    #start and little moving before pushing
-
-                            img_before,img_after = self.my_env.UR5_action(action_position,act_type)
-
-                            dx1 = act_data[12][0]*2.56
-                            dy1 = act_data[12][1]*2.56
-                            target_x = action_position[0]
-                            target_y = action_position[1]
-                            cover_x = action_position[2]
-                            cover_y = action_position[3]
-
-                            for i in range(10):
-                                episode_rgb_images.append(img_before)
-                                robot_position.append([(target_x+dx1*(i+1))/256.0,(target_y+dy1*(i+1))/256.0])    #little moving during pushing
-
-                            episode_rgb_images.append(img_after)   #after pushing
-
-                            robot_position.append([cover_x/256.0,cover_y/256.0])  
-                            print(robot_position[10],robot_position[20])
-                            action_lengths = 21
 
                     elif act_type == 2: #sucking
                             print("%s cover"%(act_name))
-                           
+
                             actions_data = act_data
-                            actions_mask = suck_mask
-
-                            dx = act_data[1][0]*25.6
-                            dy = act_data[1][1]*25.6
-
-                            _,rgb_image_raw = self.my_env.camera.get_camera_data()   #image before sucking
-                            rgb_image = np.array(rgb_image_raw)
-
-                            for i in range(11):
-                                episode_rgb_images.append(rgb_image)
-                                robot_position.append([(0+dx*i)/256.0,(0+dy*i)/256.0])    #little moving before sucking and start
+                            actions_mask = mask
+                            robot_position = positions
+                            action_lengths = act_length
+                                     
+                            _,rgb_image = self.my_env.camera.get_camera_data()   #image before pushing
+                            for i in range(action_lengths):
+                                episode_rgb_images.append(rgb_image) 
 
                             img_after = self.my_env.UR5_action(action_position,act_type)
-
-                            target_x = action_position[0]
-                            target_y = action_position[1]
-
-                            for i in range(11):
+                            for i in range(40-action_lengths):
                                 episode_rgb_images.append(img_after)
-                                robot_position.append([target_x/256.0,target_y/256.])
-                            print(robot_position[10])
-                            action_lengths = 11
-                   
-                            
-        
+
+      
 
             elif ques['type'] == 'exist_negative':
                 print("no action")
@@ -190,7 +145,7 @@ class best_action():
                 rgb_image = np.array(rgb_image_raw)
                 episode_rgb_images.append(rgb_image)         #start image
 
-                actions_data = [[1,1],[0,0]]    #no action
+                actions_data = [0,9]    #no action
                 actions_mask = [1,0]
 
                 robot_position.append([initial_x,initial_y])   #end
@@ -202,8 +157,8 @@ class best_action():
 
 
             episode_rgb_images_shrink =[]
-            while(len(actions_data)<22):
-                actions_data.append([0,0])  #add mask
+            while(len(actions_data)<40):
+                actions_data.append(9)  #add mask
                 actions_mask.append(0)
                 _,rgb_image_raw = self.my_env.camera.get_camera_data()
                 rgb_image = np.array(rgb_image_raw)
@@ -243,6 +198,9 @@ class best_action():
         action_position = [0,0,0,0]
         action_obj_name =''
         actions_data = []
+        positions_data =[]
+        actions_mask = []
+        action_lengths = 0
 
         if overlap_rate < 0.05:    #no cover
             ant_type =0
@@ -255,48 +213,134 @@ class best_action():
 
             target_position =  self.my_env.camera.world2pixel(obj_dic[target_order]['position'])
 
+
             if obj_cover_type  in self.object_character['suck']:
                 ant_type = 2
                 action_position = obj_cover_position + obj_cover_position
                 position_before = [0,0]
-                dx,dy = self.caculate_dx(obj_cover_position,position_before)
-                actions_data = [[1,1]]    #start 
-                for i in range(10):
-                    actions_data.append([dx,dy])
-                for i in range(10):
-                    actions_data.append([0,0])
-                actions_data.append([0,0])  #end
+                act_list,pos_list,act_length = self.caculate_dx(obj_cover_position,position_before)
+                actions_data = [0]    #start 
+
+                action_lengths = act_length
+                actions_data = actions_data + act_list
+                positions_data = pos_list
+
+                actions_data.append(9) #end
+                positions_data.append([0,0])
+
+                add_num = 40 - len(actions_data)
+
+                for i in range(len(actions_data)-1):   #create mask
+                    actions_mask.append(1)
+                actions_mask.append(0)
+
+                for i in range(add_num):
+                    actions_data.append(9)
+                    actions_mask.append(0)
+                    positions_data.append([0,0])
 
             else:
                 ant_type = 1
                 action_position = target_position+ obj_cover_position
                 position_before = [0,0]
-                dx,dy = self.caculate_dx(target_position,position_before)
-                dx_1,dy_1 = self.caculate_dx(obj_cover_position,target_position,2.56)
-                actions_data = [[1,1]]  #start
-                for i in range(10):
-                    actions_data.append([dx,dy])
-                for i in range(10):
-                    actions_data.append([dx_1,dy_1])
-                actions_data.append([0,0]) #end
+                act_list_1,pos_list_1,act_length_1 = self.caculate_dx(target_position,position_before)
+                act_list_2,pos_list_2,act_length_2 = self.caculate_dx(obj_cover_position,target_position)
+                actions_data = [0]    #start 
+                actions_data = actions_data + act_list_1+[0]+act_list_2
+                action_lengths = act_length_1 + act_length_2
+                positions_data = pos_list_1 +pos_list_2
+
+                actions_data.append(9) #end
+                positions_data.append([0,0])
+
+                add_num = 40 - len(actions_data)
+
+                for i in range(len(actions_data)-1):   #create mask
+                    actions_mask.append(1)
+                actions_mask.append(0)
                 
-                
+                if add_num>0:
+                    for i in range(add_num):
+                        actions_data.append(9)
+                        actions_mask.append(0)
+                        positions_data.append([0,0])
+                else:
+                    action_lengths = action_lengths+add_num
+                    actions_data = actions_data[0:39]
+                    actions_data.append(9)
+                    actions_mask = actions_mask[0:39]
+                    actions_mask.append(0)
+                    positions_data = positions_data[0:39]
+                    positions_data.append([0,0])
+ 
+                              
         action_obj_name = obj_dic[overlap_order]['name']
-        return action_position,ant_type,action_obj_name,actions_data
+        return action_position,ant_type,action_obj_name,actions_data,actions_mask,positions_data,action_lengths
 
 
-    def caculate_dx(self,position,position_before,nomal_ratio = 25.6):
-        x = position[0]
-        y = position[1]
-        x_before = position_before[0]
-        y_before = position_before[1]
-        step_size = 10.0
-        nomal_ratio = nomal_ratio
-        dx = (x-x_before)/step_size
-        dy = (y-y_before)/step_size
-        dx = dx/nomal_ratio
-        dy = dy/nomal_ratio
-        return dx,dy
+    def caculate_dx(self,position,position_before):
+        dx = []
+        dy = []
+        position_list = [position_before]
+        step_normal = 2.56
+        step_large  = 25.6
+        x_distance = position[0]-position_before[0]
+        y_distance = position[1]-position_before[1]
+        x_curr = position_before[0]
+        y_curr = position_before[1]
+        
+
+        large_x_times = int(abs(x_distance)/step_large)
+        x_rest = abs(x_distance) - large_x_times*step_large
+        normal_x_times = int(x_rest/step_normal)
+        
+
+        for i in range(large_x_times):
+            if x_distance >0:
+                dx.append(2)
+                x_curr += step_large
+            else:
+                dx.append(4)
+                x_curr -= step_large
+            position_list.append([x_curr,y_curr])
+
+        for i in range(normal_x_times):
+            if x_distance>0:
+                dx.append(1)
+                x_curr += step_normal
+            else:
+                dx.append(3)
+                x_curr -= step_normal
+            position_list.append([x_curr,y_curr])
+
+                
+        large_y_times = int(abs(y_distance)/step_large)
+        y_rest = abs(y_distance) - large_y_times*step_large
+        normal_y_times = int(y_rest/step_normal)
+        
+
+        for i in range(large_y_times):
+            if y_distance >0:
+                dy.append(6)
+                y_curr += step_large
+            else:
+                dy.append(8)
+                y_curr -= step_large
+            position_list.append([x_curr,y_curr])
+
+
+        for i in range(normal_y_times):
+            if y_distance>0:
+                dy.append(5)
+                y_curr += step_normal
+            else:
+                dy.append(7)
+                y_curr -= step_normal
+            position_list.append([x_curr,y_curr])
+
+        all_act = dx + dy   
+        action_lengths = large_x_times + normal_x_times + large_y_times + normal_y_times +1   
+        return all_act,position_list,action_lengths
         
 
 

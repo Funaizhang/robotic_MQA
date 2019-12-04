@@ -6,6 +6,7 @@ import enviroment
 from generate_questions import Qusetion
 from generate_actions import best_action
 import h5py
+import numpy as np
 '''
 scene_list_dir =os.path.abspath("simulation/test_cases")
 scene_list = os.listdir(scene_list_dir)
@@ -18,7 +19,7 @@ for scene in scene_list:
     my_action = best_action(my_enviroment)
 '''
 scene = "test-10-obj-41.txt"
-my_enviroment = enviroment.Environment(is_testing=0,testing_file = scene)
+my_enviroment = enviroment.Environment(is_testing=1,testing_file = scene)
 object_exist_list = my_enviroment.ur5.object_type
 print("the objetct which is exist:")
 print(object_exist_list)
@@ -57,21 +58,27 @@ for data in all_data:
     print(data['actions'])
     print(data['mask'])
     print(data['robot_positions'])
-    print(len(data['rgb_images']))
-    print(encoded_question)
+    print(data['action_lengths'])
+    #print(len(data['rgb_images']))
+    #print(encoded_question)
     print("...........")
     '''
-    if len(data['actions']) != 22:
+
+    if len(data['actions']) != 40:
         print('ASB')
-    if len(data['mask']) != 22:
+    if len(data['mask']) != 40:
         print('MSB')
         print(len(data['mask']))
-    if len(data['robot_positions']) !=22:
+    if len(data['robot_positions']) !=40:
         print('RSB')
         print(len(data['robot_positions']))
-    if len(data['rgb_images']) !=22:
+    if len(data['rgb_images']) !=40:
         print('ISB')
         print(len(data['rgb_images']))
+    mask_np = np.array(data['mask'])
+    if np.sum(mask_np) != data['action_lengths']:
+        print('mask_error')
+    
 
 f  = h5py.File("scene41.h5",'w')
 f['images'] = images
