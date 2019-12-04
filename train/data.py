@@ -104,11 +104,14 @@ class EqaDataset(Dataset):
         print('Reading question data into memory')
         self.questions = _dataset_to_tensor(questions_h5['questions'])
         self.answers = _dataset_to_tensor(questions_h5['answers'])
-        self.actions = _dataset_to_tensor(questions_h5['actions'],dtype = np.float32)
-        self.action_masks = _dataset_to_tensor(questions_h5['mask'])
+        self.actions = _dataset_to_tensor(questions_h5['actions'])
+        self.actions = self.actions.unsqueeze(2)
         self.robot_positions = _dataset_to_tensor(questions_h5['robot_positions'],dtype = np.float32)
         self.action_images = questions_h5['images']
         self.action_lengths = _dataset_to_tensor(questions_h5['action_lengths'])
+        self.action_masks = _dataset_to_tensor(questions_h5['mask'])
+
+
 
         #if input_type != 'ques':
         '''
@@ -125,6 +128,8 @@ class EqaDataset(Dataset):
         self.cnn = MultitaskCNN(**cnn_kwargs)
         self.cnn.eval()
         self.cnn.cuda()
+
+
 
 
     
@@ -152,12 +157,29 @@ class EqaDataset(Dataset):
                                  .cuda())).data.cpu().numpy().copy()                              
                 actions_in = actions.clone()
                 actions_out = actions[1:].clone()
-                actions_masks = actions_masks.clone()
+                actions_masks = actions_masks[:39].clone().gt(0)
                 robot_positions = robot_positions.clone()
                      
             return (idx, question, answer, planner_img_feats,
                     actions_in, actions_out,
                    robot_positions, actions_masks,action_lengths)
+
+        elif self.input_type == 'ques,image':
+            idx = index
+            question = self.questions[index]
+            answer = self.answers[index]
+
+            action_length = self.action_lengths[index]
+            actions = self.actions[index]
+
+            actions_in = actions[action_length - self.num_frames:action_length]
+            actions_out = actions[action_length - self.num_frames + 1:
+                                  action_length + 1]
+
+            images = self.action_images[index][action_length-self.num_frames:action_length].astype(np.float32)
+
+            return (idx, question, answer, images, actions_in, actions_out,
+                    action_length)
 
 
 
@@ -175,6 +197,8 @@ class EqaDataLoader(DataLoader):
             raise ValueError('Must give questions_h5')
         if 'vocab' not in kwargs:
             raise ValueError('Must give vocab')
+        # if 'num_frames' not in kwargs:
+        #     raise ValueError('Must give num_frames')
         if 'input_type' not in kwargs:
             raise ValueError('Must give input_type')
         if 'split' not in kwargs:
@@ -211,6 +235,7 @@ class EqaDataLoader(DataLoader):
         self.dataset = EqaDataset(
             questions_h5,
             vocab,
+            num_frames=kwargs.pop('num_frames'),
             split=split,
             gpu_id=gpu_id,
             input_type=input_type,
@@ -259,6 +284,7 @@ if __name__ == '__main__':
         'vocab': args.vocab_json,
         'batch_size': args.batch_size,
         'input_type': args.input_type,
+        # 'num_frames': 5,
         'split': 'train',
         'max_threads_per_gpu': args.max_threads_per_gpu,
         'gpu_id': args.gpus[0],

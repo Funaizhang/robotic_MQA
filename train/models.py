@@ -345,8 +345,8 @@ class NavRnn(nn.Module):
                  action_input=False,
                  action_embed_dim=32,
                  position_input=True,
-                 position_dim = 2,
-                 num_actions=4,
+                 position_embed_dim = 32,
+                 num_actions=10,
                  mode='sl',
                  rnn_type='LSTM',
                  rnn_hidden_dim=128,
@@ -365,7 +365,7 @@ class NavRnn(nn.Module):
         self.action_embed_dim = action_embed_dim
 
         self.position_input = position_input
-        self.position_dim = position_dim
+        self.position_embed_dim = position_embed_dim
 
         self.num_actions = num_actions
 
@@ -393,7 +393,7 @@ class NavRnn(nn.Module):
             ##############
 
             ##############
-            self.action_embed = nn.Linear(2, action_embed_dim)
+            self.action_embed = nn.Linear(1, action_embed_dim)
             ##############
 
             rnn_input_dim += action_embed_dim
@@ -401,7 +401,8 @@ class NavRnn(nn.Module):
                                                                rnn_input_dim))
 
         if self.position_input == True:
-            rnn_input_dim += position_dim
+            self.position_embed = nn.Linear(2, position_embed_dim)
+            rnn_input_dim += position_embed_dim
             print('Adding input to %s: position, rnn dim: %d' % (self.rnn_type,
                                                                rnn_input_dim))
 
@@ -415,7 +416,7 @@ class NavRnn(nn.Module):
         print('Building %s with hidden dim: %d' % (self.rnn_type,
                                                    rnn_hidden_dim))
 
-        self.decoder = nn.Linear(self.rnn_hidden_dim, 2)
+        self.decoder = nn.Linear(self.rnn_hidden_dim, self.num_actions)
 
     def init_hidden(self, bsz):
         weight = next(self.parameters()).data
@@ -434,7 +435,7 @@ class NavRnn(nn.Module):
                 img_feats,
                 question_feats,
                 actions_in,
-                position_feats,
+                position_in,
                 action_lengths,
                 hidden=False):
         input_feats = Variable()
@@ -463,25 +464,26 @@ class NavRnn(nn.Module):
 
         if self.position_input == True:
             if len(input_feats) == 0:
-                input_feats = position_feats
+                input_feats = position_in
             else:
-                input_feats = torch.cat([input_feats, position_feats], 2)
+                input_feats = torch.cat([input_feats, self.position_embed(position_in.float())], 2)
 
             
         packed_input_feats = pack_padded_sequence(
             input_feats,action_lengths, batch_first=True)
         packed_output, hidden = self.rnn(packed_input_feats)
-        rnn_output, _ = pad_packed_sequence(packed_output, batch_first=True, total_length=21)
+        rnn_output, _ = pad_packed_sequence(packed_output, batch_first=True, total_length=39)
 
         output = self.decoder(rnn_output.contiguous().view(
             rnn_output.size(0) * rnn_output.size(1), rnn_output.size(2)))
+
 
         if self.return_states == True:
             return rnn_output, output, hidden
         else:
             return output, hidden
 
-    def step_forward(self, img_feats, question_feats, actions_in,position_feats, hidden):
+    def step_forward(self, img_feats, question_feats, actions_in,position_in, hidden):
         input_feats = Variable()
 
         T = False
@@ -509,9 +511,10 @@ class NavRnn(nn.Module):
 
         if self.position_input == True:
             if len(input_feats) == 0:
-                input_feats = position_feats
+                input_feats = position_in
             else:
-                input_feats = torch.cat([input_feats, position_feats], 2)
+                input_feats = torch.cat(
+                    [input_feats, self.position_embed(position_in.float())], 2)
 
         output, hidden = self.rnn(input_feats, hidden)
 
@@ -526,14 +529,14 @@ class NavRnn(nn.Module):
 class NavPlannerControllerModel(nn.Module):
     def __init__(self,
                  question_vocab,
-                 num_output=4,
+                 num_output=10,
                  question_wordvec_dim=64,
                  question_hidden_dim=64,
                  question_num_layers=2,
                  question_dropout=0.5,
                  planner_rnn_image_feat_dim=128,
                  planner_rnn_action_embed_dim=32,
-                 planner_rnn_position_dim =2,
+                 planner_rnn_position_dim =32,
                  planner_rnn_type='GRU',
                  planner_rnn_hidden_dim=1024,
                  planner_rnn_num_layers=1,
@@ -568,7 +571,7 @@ class NavPlannerControllerModel(nn.Module):
             action_input=True,
             action_embed_dim=planner_rnn_action_embed_dim,
             position_input=True,
-            position_dim=planner_rnn_position_dim,
+            position_embed_dim=planner_rnn_position_dim,
             num_actions=num_output,
             rnn_type=planner_rnn_type,
             rnn_hidden_dim=planner_rnn_hidden_dim,

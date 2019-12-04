@@ -26,6 +26,7 @@ import pdb
 
 
 def eval(rank, args, shared_model):
+    print('eval start...')
 
     torch.cuda.set_device(args.gpus.index(args.gpus[rank % len(args.gpus)]))
 
@@ -51,6 +52,8 @@ def eval(rank, args, shared_model):
         'max_threads_per_gpu': args.max_threads_per_gpu,
         'gpu_id': args.gpus[rank%len(args.gpus)],
     }
+
+    # print(eval_loader_kwargs)
 
     eval_loader = EqaDataLoader(**eval_loader_kwargs)
     print('eval_loader has %d samples' % len(eval_loader.dataset))
@@ -200,6 +203,7 @@ def train(rank, args, shared_model):
     t, epoch = 0, 0
 
     while epoch < int(args.max_epochs):
+        # print('epoch no. %d' % epoch)
 
         if args.input_type == 'ques':
 
@@ -296,11 +300,11 @@ def train(rank, args, shared_model):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     # data params
-    parser.add_argument('-train_h5', default='data/train.h5')
-    parser.add_argument('-val_h5', default='data/val.h5')
-    parser.add_argument('-test_h5', default='data/test.h5')
-    parser.add_argument('-data_json', default='data/data.json')
-    parser.add_argument('-vocab_json', default='data/vocab.json')
+    parser.add_argument('-train_h5', default='scene_all.h5')
+    parser.add_argument('-val_h5', default='scene_all.h5')
+    parser.add_argument('-test_h5', default='scene_all.h5')
+    # parser.add_argument('-data_json', default='/data/data.json')
+    parser.add_argument('-vocab_json', default='vocab.json')
 
     parser.add_argument('-train_cache_path', default=False)
     parser.add_argument('-val_cache_path', default=False)
@@ -309,14 +313,11 @@ if __name__ == '__main__':
     parser.add_argument('-eval_split', default='val', type=str)
 
     # model details
-    parser.add_argument(
-        '-input_type', default='ques,image', choices=['ques', 'ques,image'])
-    parser.add_argument(
-        '-num_frames', default=1,
-        type=int)  # -1 = all frames of navigation sequence
+    parser.add_argument('-input_type', default='ques,image', choices=['ques', 'ques,image'])
+    parser.add_argument('-num_frames', default=1, type=int)  # -1 = all frames of navigation sequence
 
     # optim params
-    parser.add_argument('-batch_size', default=20, type=int)
+    parser.add_argument('-batch_size', default=128, type=int)
     parser.add_argument('-learning_rate', default=3e-4, type=float)
     parser.add_argument('-max_epochs', default=1000, type=int)
 
@@ -336,12 +337,17 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     args.time_id = time.strftime("%m_%d_%H:%M")
+    
     try:
         args.gpus = os.environ['CUDA_VISIBLE_DEVICES'].split(',')
         args.gpus = [int(x) for x in args.gpus]
     except KeyError:
-        print("CPU not supported")
-        exit()
+        os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+        args.gpus = os.environ['CUDA_VISIBLE_DEVICES'].split(',')
+        args.gpus = [int(x) for x in args.gpus]
+        print(args.gpus)
+        # print("CPU not supported")
+        # exit()
 
     if args.checkpoint_path != False:
         print('Loading checkpoint from %s' % args.checkpoint_path)
@@ -395,16 +401,16 @@ if __name__ == '__main__':
 
         # Start the eval thread
         print('START')
-        #p = mp.Process(target=eval, args=(0, args, shared_model))
-        #p.start()
-        #processes.append(p)
+        # p = mp.Process(target=eval, args=(0, args, shared_model))
+        # p.start()
+        # processes.append(p)
 
         # Start the training thread(s)
         for rank in range(1, args.num_processes + 1):
-            #p = mp.Process(target=train, args=(rank, args, shared_model))
-            #p.start()
-            #processes.append(p)
+            # p = mp.Process(target=train, args=(rank, args, shared_model))
+            # p.start()
+            # processes.append(p)
             train(rank, args, shared_model)
 
-        #for p in processes:
-        #    p.join()
+        # for p in processes:
+        #     p.join()

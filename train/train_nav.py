@@ -19,9 +19,11 @@ from models import MultitaskCNN
 import cv2 as cv
 import time
 import sys
+import time
 sys.path.append(r'../simulation')
 import enviroment
 from generate_questions import Qusetion
+
 
 torch.backends.cudnn.enabled = False
 
@@ -52,6 +54,37 @@ def _dataset_to_tensor(dset, mask=None, dtype=np.int64):
         tensor = torch.LongTensor(arr)
     return tensor
 
+def data2input(position,rgb_image_raw,cnn):
+    position_in_tensor = _dataset_to_tensor(position,dtype=np.float32)   #positions
+    position_in = Variable(position_in_tensor)
+    position_in = position_in.unsqueeze(0)
+    position_in = position_in.unsqueeze(0)
+      
+    shrink = cv.resize(rgb_image_raw,(224,224),interpolation=cv.INTER_AREA)
+    shrink = np.array(shrink)
+    shrink = shrink.transpose((2,0,1))
+    shrink = shrink.reshape(1,3,224,224)
+    shrink = (shrink/255.0).astype(np.float32)
+                  #resize image 
+    planner_img_feats = cnn(
+                        Variable(torch.FloatTensor(shrink)
+                        .cuda())).data.cpu().numpy().copy()  
+    planner_img_feats_var =Variable(torch.FloatTensor(planner_img_feats))
+
+    planner_img_feats_var =  planner_img_feats_var.unsqueeze(0)
+
+    return position_in,planner_img_feats_var
+
+
+def order2action(order):
+    order_list =[
+                [2.56,0],[25.6,0],[-2.56,0],[-25.6,0],
+                [0,2.56],[0,25.6],[0,-2.56],[0,-25.6],[0,0]
+                ]
+    return order_list[order-1][0],order_list[order-1][1]
+    
+            
+
 def test(rank, test_model_dir):
      model_kwargs = {'question_vocab': load_vocab(args.vocab_json)}
      model = NavPlannerControllerModel(**model_kwargs)
@@ -64,8 +97,8 @@ def test(rank, test_model_dir):
      cnn.cuda()                   #create cnn model
 
 
-     scene = "test-10-obj-10.txt"
-     my_env = enviroment.Environment(is_testing=0,testing_file = scene)
+     scene = "test-10-obj-00.txt"
+     my_env = enviroment.Environment(is_testing=1,testing_file = scene)
      object_exist_list = my_env.ur5.object_type
      print("the objetct which is exist:")
      print(object_exist_list)                    #create simulation enviroment
@@ -74,22 +107,15 @@ def test(rank, test_model_dir):
      testing_questions  = my_question.createQueue()
      vocab = my_question.create_vocab()
 
-     action_in_raw =[1,1,1,1,1]    #start action_in
-     action_out_raw = [0,0,0,0,0]
-     action_in_tensor = _dataset_to_tensor(action_in_raw)
-     action_out_tensor = _dataset_to_tensor(action_out_raw)
-     action_in = Variable(action_in_tensor)
-     action_out = Variable(action_out_tensor)
-     action_in = action_in.unsqueeze(0)
-     action_in = action_in.unsqueeze(0)
-     #print(action_in.size())
 
-     planner_hidden = None
-     max_action = 3
-
-     for question in testing_questions:
-        action_times = 0
-        print(question['question'])
+     for question in testing_questions:       
+        planner_hidden = None
+        max_action = 30
+        position = [0,0]
+        action_in_raw =[0]    #start action_in
+        actions = []
+ 
+        print(question['question'])   #question 
         questionTokens = my_question.tokenize(
                 question['question'], punctToRemove=['?'], addStartToken=False)
         encoded_question_raw = my_question.encode(questionTokens, vocab['questionTokenToIdx'])
@@ -98,56 +124,66 @@ def test(rank, test_model_dir):
         encoded_question_tensor = _dataset_to_tensor(encoded_question_raw)
         encoded_question = Variable(encoded_question_tensor)
         encoded_question = encoded_question.unsqueeze(0)
+        action_times = 0
+        
+        while(action_times < max_action):
 
-        while(action_times < max_action):       
-            _,rgb_image_raw = my_env.camera.get_camera_data()      
-            shrink = cv.resize(rgb_image_raw,(224,224),interpolation=cv.INTER_AREA)
-            shrink = np.array(shrink)
-            shrink = shrink.transpose((2,0,1))
-            shrink = shrink.reshape(1,3,224,224)
-            shrink = (shrink/255.0).astype(np.float32)
-                  #resize image 
-            planner_img_feats = cnn(
-                        Variable(torch.FloatTensor(shrink)
-                                 .cuda())).data.cpu().numpy().copy()  
-            planner_img_feats_var =Variable(torch.FloatTensor(planner_img_feats))
-
-            planner_img_feats_var =  planner_img_feats_var.unsqueeze(0)
-            
             #print(planner_img_feats_var.size())
+            action_in_tensor = _dataset_to_tensor(action_in_raw)
+            action_in = Variable(action_in_tensor)
+            action_in = action_in.unsqueeze(0)
+            action_in = action_in.unsqueeze(0)
 
-            action_out_raw, planner_hidden = model.planner_step(encoded_question,planner_img_feats_var,action_in,planner_hidden)
-            
-            print(action_out_raw.size())
+            _,rgb_image_raw = my_env.camera.get_camera_data()  
+            position_in,planner_img_feats_var =data2input(position,rgb_image_raw,cnn)
 
-            action_out = F.sigmoid(action_out_raw)
-
-            
-
-            action_get =action_out.data.numpy()
-
-            action_position = np.array(action_get[0][0:4])
-            action_position = (action_position*256).astype(np.int32)
-            max_position = np.max(action_position)
-            action_type = int(action_get[0][4]*2)
-
-            print("type")
-            print(action_type)
-            print("position")
-            print(action_position)
-            '''
-            if action_type == 0:  #stop action
+            output_data, planner_hidden = model.planner_step(encoded_question,planner_img_feats_var,action_in,position_in,planner_hidden)
+            planner_possi = F.log_softmax(output_data, dim=1)
+            planner_data =  planner_possi.data.numpy()
+            planner_data = planner_data[0]
+            action_out = np.where(planner_data == np.max(planner_data))
+            action_out = action_out[0][0]
+           
+            actions.append(action_out)          
+            action_in_raw = [action_out]
+            if action_out == 9:
                 print('stop')
                 break
             else:
-            '''
-            if max_position > 20:
-                my_env.UR5_action(action_position,1)   #output action
-                action_times +=1
-                action_in = action_out_raw.unsqueeze(0)
-            else: 
-                action_in = action_out_raw.unsqueeze(0)
-                break
+                dx,dy = order2action(action_out)
+                position[0] += dx
+                position[1] += dy
+            action_times +=1
+        
+        if len(actions)>2 and len(actions)<20:
+            action_position = position+position
+            my_env.UR5_action(action_position,2)  #sucking
+        elif len(actions)>=20:   #pushing
+            position_start=[0,0]
+            position_end =[0,0]
+            for i in range(len(actions)):
+                if i<len(actions)/2:   #the first step
+                    dx,dy = order2action(actions[i])
+                    position_start[0] += dx
+                    position_start[1] += dy
+                    position_end[0] +=dx
+                    position_end[1] += dy
+                else:  #the second step
+                    dx,dy = order2action(actions[i])
+                    position_end[0] += dx
+                    position_end[1] += dy
+            action_position = position_start+position_end
+            my_env.UR5_action(action_position,1)  #pushing
+
+            
+            
+           
+
+        
+
+ 
+        
+
 
 
 
@@ -165,7 +201,7 @@ def train(rank, args, shared_model):
     else:
         exit()
 
-    lossFn = torch.nn.MSELoss(reduction='none').cuda()
+   
 
     optim = torch.optim.Adamax(
         filter(lambda p: p.requires_grad, shared_model.parameters()),
@@ -208,7 +244,7 @@ def train(rank, args, shared_model):
     t, epoch = 0, 0
 
     while epoch < int(args.max_epochs):
-        planner_lossFn = torch.nn.MSELoss(reduction='none').cuda()
+        planner_lossFn = MaskedNLLCriterion().cuda()
         for batch in train_loader:
             t += 1
             model.load_state_dict(shared_model.state_dict())
@@ -242,32 +278,47 @@ def train(rank, args, shared_model):
             planner_actions_out_var = planner_actions_out_var[perm_idx]
             planner_masks_var = planner_masks_var[perm_idx]
             planner_positions_var = planner_positions_var[perm_idx]
+
             '''
             print('action')
-            print(planner_actions_in_var)
-            print('positions')
+            print(planner_actions_out_var)
+            print('position')
             print(planner_positions_var)
+            print('image')
+            print(planner_img_feats_var)
             '''
 
-            #calculate the model score using the action with lagest length
+            #print(planner_masks_var)
+
             planner_scores, planner_hidden = model(      
                 questions_var, planner_img_feats_var,
                 planner_actions_in_var,
                 planner_positions_var, planner_action_lengths.cpu().numpy().astype(np.long))
 
-            planner_logprob = F.sigmoid(planner_scores)
+            planner_logprob = F.log_softmax(planner_scores, dim=1)
 
 
+            
+            planner_loss = planner_lossFn(
+                        planner_logprob,
+                        planner_actions_out_var.contiguous().view(-1, 1),
+                        planner_masks_var.contiguous().view(-1, 1))
+            
+
+            '''
             planner_loss = planner_lossFn(
                 planner_logprob.view(-1,21,2),
                 planner_actions_out_var.float())
             planner_loss = planner_loss.mean(2)
-            #print(planner_logprob.view(-1,4,5).size())
-            #print(planner_actions_out_var.size())
-            #print(planner_masks_var.size())
-            #print(planner_loss.size())
-            planner_loss = planner_loss * planner_masks_var.float()[:,:-1]
-            planner_loss = planner_loss.mean()
+
+            print('loss')
+            print(planner_loss)
+            print('masks')
+            print(planner_masks_var.float()[:,:-1])
+            '''
+
+            #planner_loss = planner_loss * planner_masks_var.float()[:,:-1]
+            #planner_loss = planner_loss.mean()
             #TODO masked
 
 
@@ -317,7 +368,7 @@ def train(rank, args, shared_model):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     # data params
-    parser.add_argument('-train_h5', default='scene00.h5')
+    parser.add_argument('-train_h5', default='scene_all.h5')
     parser.add_argument('-val_h5', default='data/val.h5')
     parser.add_argument('-test_h5', default='data/test.h5')
 
@@ -340,8 +391,8 @@ if __name__ == '__main__':
     parser.add_argument('-curriculum', default=0, type=int)
 
     # optim params
-    parser.add_argument('-batch_size', default=4, type=int)
-    parser.add_argument('-learning_rate', default=1e-3, type=float)
+    parser.add_argument('-batch_size', default=128, type=int)
+    parser.add_argument('-learning_rate', default=1e-4, type=float)
     parser.add_argument('-max_epochs', default=10000, type=int)
 
 
@@ -454,7 +505,7 @@ if __name__ == '__main__':
             train(0, args, shared_model)
 
     elif args.mode == 'test':
-        test_model_dir = "epoch_10000_thread_0.pt"
+        test_model_dir = "epoch_4900_thread_0.pt"
         test(0,test_model_dir)
 
     else:
